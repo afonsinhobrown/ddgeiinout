@@ -1,0 +1,7 @@
+stae.db
+guias/
+__pycache__/
+*.pyc
+dist/
+build/
+*.spec
