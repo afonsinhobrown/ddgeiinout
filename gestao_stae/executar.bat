@@ -4,9 +4,9 @@ echo   STAE - Executar Servidor Local
 echo ==========================================
 echo.
 echo 1. Verificando dependencias...
-pip install flask reportlab
+py -m pip install flask reportlab
 echo.
 echo 2. Iniciando servidor...
-python app.py
+py app.py
 echo.
 pause
