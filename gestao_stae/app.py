@@ -12,10 +12,78 @@ import hashlib
 import io
 import psycopg2
 
+# ---------------------------------------------------------
+# HYBRID DATABASE WRAPPER FOR SEAMLESS CLOUD/LOCAL DEPLOYMENT
+# ---------------------------------------------------------
+def is_cloud_mode():
+    return (
+        os.environ.get('CLOUD_MODE') == 'true' or
+        os.environ.get('VERCEL') == '1' or
+        os.environ.get('RENDER') == 'true' or
+        os.environ.get('ORIGEM_CADASTRO') == 'nuvem'
+    )
+
+class PGCursorWrapper:
+    def __init__(self, pg_cursor):
+        self.pg_cursor = pg_cursor
+    def execute(self, query, params=None):
+        # Translate query placeholders from ? to %s and column names from setor_id to sector_id
+        translated_query = query.replace('?', '%s').replace('setor_id', 'sector_id')
+        if params is not None:
+            self.pg_cursor.execute(translated_query, params)
+        else:
+            self.pg_cursor.execute(translated_query)
+        return self
+    def executemany(self, query, seq_of_params):
+        translated_query = query.replace('?', '%s').replace('setor_id', 'sector_id')
+        self.pg_cursor.executemany(translated_query, seq_of_params)
+        return self
+    def fetchone(self):
+        return self.pg_cursor.fetchone()
+    def fetchall(self):
+        return self.pg_cursor.fetchall()
+    def close(self):
+        self.pg_cursor.close()
+    def __enter__(self):
+        self.pg_cursor.__enter__()
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self.pg_cursor.__exit__(exc_type, exc_val, exc_tb)
+
+class PGConnectionWrapper:
+    def __init__(self, pg_conn):
+        self.pg_conn = pg_conn
+    def cursor(self):
+        return PGCursorWrapper(self.pg_conn.cursor())
+    def commit(self):
+        self.pg_conn.commit()
+    def rollback(self):
+        self.pg_conn.rollback()
+    def close(self):
+        self.pg_conn.close()
+    def __enter__(self):
+        self.pg_conn.__enter__()
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self.pg_conn.__exit__(exc_type, exc_val, exc_tb)
+
+_original_sqlite_connect = sqlite3.connect
+
+def smart_connect(database, *args, **kwargs):
+    if is_cloud_mode():
+        pg_url = os.environ.get('DATABASE_URL') or os.environ.get('PG_URL') or "postgresql://neondb_owner:npg_3BsxjEU4NCki@ep-withered-truth-asbeszuu-pooler.c-4.eu-central-1.aws.neon.tech/equipamento?sslmode=require&channel_binding=require"
+        pg_conn = psycopg2.connect(pg_url)
+        return PGConnectionWrapper(pg_conn)
+    else:
+        return _original_sqlite_connect(database, *args, **kwargs)
+
+sqlite3.connect = smart_connect
+
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or 'stae_secret_key_2026'
 
-DB_PATH = 'stae.db'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'stae.db')
 
 def check_and_auto_migrate():
     if not os.path.exists(DB_PATH): return
@@ -33,10 +101,10 @@ def check_and_auto_migrate():
         try:
             import shutil
             # Create a backup of the old stae.db
-            shutil.copy(DB_PATH, 'stae_antigo.db')
+            shutil.copy(DB_PATH, os.path.join(BASE_DIR, 'stae_antigo.db'))
             
             # Connect to old database to extract data
-            conn_old = sqlite3.connect('stae_antigo.db')
+            conn_old = sqlite3.connect(os.path.join(BASE_DIR, 'stae_antigo.db'))
             old = conn_old.cursor()
             
             old.execute("SELECT id, username, password, perfil FROM users")
@@ -110,8 +178,8 @@ def check_and_auto_migrate():
             print("[+] Migração automática concluída com sucesso!")
         except Exception as e:
             print(f"[-] Erro na migração automática: {e}")
-            if os.path.exists('stae_antigo.db'):
-                shutil.copy('stae_antigo.db', DB_PATH)
+            if os.path.exists(os.path.join(BASE_DIR, 'stae_antigo.db')):
+                shutil.copy(os.path.join(BASE_DIR, 'stae_antigo.db'), DB_PATH)
 
 def check_db_integrity(c):
     try:
@@ -162,6 +230,9 @@ def create_triggers(c):
         ''')
 
 def init_db():
+    if is_cloud_mode():
+        init_pg_db()
+        return
     check_and_auto_migrate()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -2169,7 +2240,7 @@ def ver_guia(guia):
     c_pdf = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    logo_path = 'logo.jpeg'
+    logo_path = os.path.join(BASE_DIR, 'logo.jpeg')
     if os.path.exists(logo_path):
         try: c_pdf.drawImage(ImageReader(logo_path), width/2 - 40, height - 90, width=80, height=80, preserveAspectRatio=True)
         except: pass
@@ -2888,6 +2959,8 @@ def sync_inventario_local():
     return True
 
 def sync_databases():
+    if is_cloud_mode():
+        return True
     conn = get_pg_connection()
     if not conn:
         print("[-] Sincronização cancelada: PostgreSQL Cloud inacessível.")
@@ -2909,7 +2982,8 @@ def sync_databases():
     except Exception as e:
         print(f"[-] Erro durante a sincronização: {e}")
         return False
+init_db()
+
 if __name__ == '__main__':
-    init_db()
     Timer(1.5, lambda: webbrowser.open('http://127.0.0.1:5000')).start()
     app.run(host='127.0.0.1', port=5000)
