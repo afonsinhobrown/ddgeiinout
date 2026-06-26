@@ -1560,20 +1560,30 @@ def auth():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    error_msg = ""
     if request.method == 'POST':
-        u = request.form['username']
-        p = hashlib.md5(request.form['password'].encode()).hexdigest()
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT perfil, nome_completo FROM users WHERE username=? AND password=?", (u, p))
-        res = c.fetchone()
-        conn.close()
-        if res:
-            session['username'] = u
-            session['perfil'] = res[0]
-            session['nome_completo'] = res[1] or u
-            return redirect(url_for('index'))
-    return render_template_string(LOGIN_TEMPLATE)
+        u = request.form.get('username', '').strip()
+        p = hashlib.md5(request.form.get('password', '').encode()).hexdigest()
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("SELECT perfil, nome_completo FROM users WHERE username=? AND password=?", (u, p))
+            res = c.fetchone()
+            conn.close()
+            if res:
+                session['username'] = u
+                session['perfil'] = res[0]
+                session['nome_completo'] = res[1] or u
+                return redirect(url_for('index'))
+            else:
+                error_msg = f"<p style='color:red;'>Credenciais inválidas! BD: {'Nuvem' if is_cloud_mode() else 'Local'}</p>"
+        except Exception as e:
+            error_msg = f"<p style='color:red;'>Erro BD: {str(e)}</p>"
+    
+    template = LOGIN_TEMPLATE
+    if error_msg:
+        template = template.replace('Faça login para continuar', error_msg)
+    return render_template_string(template)
 
 @app.route('/logout')
 def logout():
