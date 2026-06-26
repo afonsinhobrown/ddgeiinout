@@ -42,6 +42,9 @@ class PGCursorWrapper:
         return self.pg_cursor.fetchone()
     def fetchall(self):
         return self.pg_cursor.fetchall()
+    @property
+    def description(self):
+        return self.pg_cursor.description
     def close(self):
         self.pg_cursor.close()
     def __enter__(self):
