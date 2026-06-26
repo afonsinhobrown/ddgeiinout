@@ -15,13 +15,22 @@ import psycopg2
 # ---------------------------------------------------------
 # HYBRID DATABASE WRAPPER FOR SEAMLESS CLOUD/LOCAL DEPLOYMENT
 # ---------------------------------------------------------
+from flask import has_request_context, request
+
 def is_cloud_mode():
-    return (
-        os.environ.get('CLOUD_MODE') == 'true' or
+    # 1. Verifica variáveis de ambiente
+    if (os.environ.get('CLOUD_MODE') == 'true' or
         os.environ.get('VERCEL') == '1' or
         os.environ.get('RENDER') == 'true' or
-        os.environ.get('ORIGEM_CADASTRO') == 'nuvem'
-    )
+        os.environ.get('ORIGEM_CADASTRO') == 'nuvem'):
+        return True
+    
+    # 2. Verifica a URL ativa (Fallback à prova de bala)
+    if has_request_context():
+        if 'vercel.app' in request.host:
+            return True
+            
+    return False
 
 class PGCursorWrapper:
     def __init__(self, pg_cursor):
@@ -2998,5 +3007,10 @@ def sync_databases():
 init_db()
 
 if __name__ == '__main__':
+    # Executa a sincronização inteligente apenas se estiver em modo local
+    if not is_cloud_mode():
+        print("[*] Ambiente local detetado. Iniciando sincronização bidirecional...")
+        run_startup_sync()
+        
     Timer(1.5, lambda: webbrowser.open('http://127.0.0.1:5000')).start()
     app.run(host='127.0.0.1', port=5000)
