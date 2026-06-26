@@ -1585,7 +1585,7 @@ def login():
                 session['nome_completo'] = res[1] or u
                 return redirect(url_for('index'))
             else:
-                error_msg = f"<p style='color:red;'>Credenciais inválidas! BD: {'Nuvem' if is_cloud_mode() else 'Local'}</p>"
+                error_msg = f"<p style='color:red;'>Credenciais inválidas! BD: {'Nuvem' if is_cloud_mode() else 'Local'}<br>User digitado: '{u}'<br>Hash gerado: {p}</p>"
         except Exception as e:
             error_msg = f"<p style='color:red;'>Erro BD: {str(e)}</p>"
     
