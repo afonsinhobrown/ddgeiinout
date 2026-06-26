@@ -2726,284 +2726,150 @@ def run_startup_sync():
     init_pg_db()
     sync_databases()
 
-def sync_lookup_table(table_name):
-    s_conn = sqlite3.connect(DB_PATH)
-    s_c = s_conn.cursor()
-    s_c.execute(f"SELECT nome, last_modified, origem_registo FROM {table_name}")
-    s_items = {r[0]: (r[1], r[2]) for r in s_c.fetchall()}
-    
-    pg_conn = get_pg_connection()
-    if not pg_conn:
-        s_conn.close()
-        return False
-    pg_c = pg_conn.cursor()
-    pg_c.execute(f"SELECT nome, last_modified, origem_registo FROM {table_name}")
-    pg_items = {r[0]: (r[1], r[2]) for r in pg_c.fetchall()}
-    
-    for nome, (s_lm, s_orig) in s_items.items():
-        if nome not in pg_items:
-            pg_c.execute(f"INSERT INTO {table_name} (nome, last_modified, origem_registo) VALUES (%s, %s, %s)", (nome, s_lm, s_orig))
-        elif s_lm > pg_items[nome][0]:
-            pg_c.execute(f"UPDATE {table_name} SET last_modified=%s, origem_registo=%s WHERE nome=%s", (s_lm, s_orig, nome))
-            
-    for nome, (pg_lm, pg_orig) in pg_items.items():
-        if nome not in s_items:
-            s_c.execute(f"INSERT INTO {table_name} (nome, last_modified, origem_registo) VALUES (?, ?, ?)", (nome, pg_lm, pg_orig))
-        elif pg_lm > s_items[nome][0]:
-            s_c.execute(f"UPDATE {table_name} SET last_modified=?, origem_registo=? WHERE nome=?", (pg_lm, pg_orig, nome))
-            
-    pg_conn.commit()
-    pg_conn.close()
-    s_conn.commit()
-    s_conn.close()
-    return True
+SYNC_CONFIG = {
+    'users': ['username'],
+    'setores': ['nome'],
+    'funcionarios': ['nome'],
+    'movimentos': ['guia'],
+    'marcas': ['nome'],
+    'tipos_equipamento': ['nome'],
+    'motivos': ['nome'],
+    'fornecedores': ['nome'],
+    'instituicoes': ['nome'],
+    'inventario_local': ['equipamento', 'marca', 'numero_serie']
+}
 
-def sync_users():
-    s_conn = sqlite3.connect(DB_PATH)
-    s_c = s_conn.cursor()
-    s_c.execute("SELECT username, password, perfil, nome_completo, last_modified, origem_registo FROM users")
-    s_users = {r[0]: {'password': r[1], 'perfil': r[2], 'nome_completo': r[3], 'last_modified': r[4], 'origem_registo': r[5]} for r in s_c.fetchall()}
-    
-    pg_conn = get_pg_connection()
-    if not pg_conn:
-        s_conn.close()
-        return False
-    pg_c = pg_conn.cursor()
-    pg_c.execute("SELECT username, password, perfil, nome_completo, last_modified, origem_registo FROM users")
-    pg_users = {r[0]: {'password': r[1], 'perfil': r[2], 'nome_completo': r[3], 'last_modified': r[4], 'origem_registo': r[5]} for r in pg_c.fetchall()}
-    
-    for username, s_u in s_users.items():
-        if username not in pg_users:
-            pg_c.execute("INSERT INTO users (username, password, perfil, nome_completo, last_modified, origem_registo) VALUES (%s, %s, %s, %s, %s, %s)",
-                         (username, s_u['password'], s_u['perfil'], s_u['nome_completo'], s_u['last_modified'], s_u['origem_registo']))
-        elif s_u['last_modified'] > pg_users[username]['last_modified']:
-            pg_c.execute("UPDATE users SET password=%s, perfil=%s, nome_completo=%s, last_modified=%s, origem_registo=%s WHERE username=%s",
-                         (s_u['password'], s_u['perfil'], s_u['nome_completo'], s_u['last_modified'], s_u['origem_registo'], username))
-            
-    for username, pg_u in pg_users.items():
-        if username not in s_users:
-            s_c.execute("INSERT INTO users (username, password, perfil, nome_completo, last_modified, origem_registo) VALUES (?, ?, ?, ?, ?, ?)",
-                        (username, pg_u['password'], pg_u['perfil'], pg_u['nome_completo'], pg_u['last_modified'], pg_u['origem_registo']))
-        elif pg_u['last_modified'] > s_users[username]['last_modified']:
-            s_c.execute("UPDATE users SET password=?, perfil=?, nome_completo=?, last_modified=?, origem_registo=? WHERE username=?",
-                        (pg_u['password'], pg_u['perfil'], pg_u['nome_completo'], pg_u['last_modified'], pg_u['origem_registo'], username))
-            
-    pg_conn.commit()
-    pg_conn.close()
-    s_conn.commit()
-    s_conn.close()
-    return True
+def get_table_columns(cursor, table_name, is_pg=False):
+    if is_pg:
+        cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = %s", (table_name,))
+        return [row[0] for row in cursor.fetchall() if row[0] != 'id']
+    else:
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        return [row[1] for row in cursor.fetchall() if row[1] != 'id']
 
-def sync_funcionarios():
-    s_conn = sqlite3.connect(DB_PATH)
-    s_c = s_conn.cursor()
-    
-    s_c.execute("SELECT id, nome FROM setores")
-    s_sector_id_to_name = {r[0]: r[1] for r in s_c.fetchall()}
-    s_sector_name_to_id = {v: k for k, v in s_sector_id_to_name.items()}
-    
-    s_c.execute("SELECT nome, cargo, setor_id, last_modified, origem_registo FROM funcionarios")
-    s_funcs = {r[0]: {'cargo': r[1], 'sector_name': s_sector_id_to_name.get(r[2], ''), 'last_modified': r[3], 'origem_registo': r[4]} for r in s_c.fetchall()}
-    
-    pg_conn = get_pg_connection()
-    if not pg_conn:
-        s_conn.close()
-        return False
-    pg_c = pg_conn.cursor()
-    
-    pg_c.execute("SELECT id, nome FROM setores")
-    pg_sector_id_to_name = {r[0]: r[1] for r in pg_c.fetchall()}
-    pg_sector_name_to_id = {v: k for k, v in pg_sector_id_to_name.items()}
-    
-    pg_c.execute("SELECT nome, cargo, sector_id, last_modified, origem_registo FROM funcionarios")
-    pg_funcs = {r[0]: {'cargo': r[1], 'sector_name': pg_sector_id_to_name.get(r[2], ''), 'last_modified': r[3], 'origem_registo': r[4]} for r in pg_c.fetchall()}
-    
-    for nome, s_f in s_funcs.items():
-        pg_sec_id = pg_sector_name_to_id.get(s_f['sector_name'])
-        if nome not in pg_funcs:
-            pg_c.execute("INSERT INTO funcionarios (nome, cargo, sector_id, last_modified, origem_registo) VALUES (%s, %s, %s, %s, %s)",
-                         (nome, s_f['cargo'], pg_sec_id, s_f['last_modified'], s_f['origem_registo']))
-        elif s_f['last_modified'] > pg_funcs[nome]['last_modified']:
-            pg_c.execute("UPDATE funcionarios SET cargo=%s, sector_id=%s, last_modified=%s, origem_registo=%s WHERE nome=%s",
-                         (s_f['cargo'], pg_sec_id, s_f['last_modified'], s_f['origem_registo'], nome))
-            
-    for nome, pg_f in pg_funcs.items():
-        s_sec_id = s_sector_name_to_id.get(pg_f['sector_name'])
-        if nome not in s_funcs:
-            s_c.execute("INSERT INTO funcionarios (nome, cargo, setor_id, last_modified, origem_registo) VALUES (?, ?, ?, ?, ?)",
-                         (nome, pg_f['cargo'], s_sec_id, pg_f['last_modified'], pg_f['origem_registo']))
-        elif pg_f['last_modified'] > s_funcs[nome]['last_modified']:
-            s_c.execute("UPDATE funcionarios SET cargo=?, setor_id=?, last_modified=?, origem_registo=? WHERE nome=?",
-                         (pg_f['cargo'], s_sec_id, pg_f['last_modified'], pg_f['origem_registo'], nome))
-            
-    pg_conn.commit()
-    pg_conn.close()
-    s_conn.commit()
-    s_conn.close()
-    return True
+def normalize_pg_schema(pg_c):
+    try:
+        pg_c.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'funcionarios' AND column_name = 'sector_id'")
+        if pg_c.fetchone():
+            pg_c.execute("ALTER TABLE funcionarios RENAME COLUMN sector_id TO setor_id")
+            print("[+] Renomeada coluna 'sector_id' para 'setor_id' no PostgreSQL.")
+    except Exception as e:
+        print("[-] Erro ao normalizar esquema no PG:", e)
 
-def sync_movimentos():
-    s_conn = sqlite3.connect(DB_PATH)
-    s_c = s_conn.cursor()
+def sync_schema_dynamic(s_c, pg_c, table_name):
+    s_cols = get_table_columns(s_c, table_name, is_pg=False)
+    pg_cols = get_table_columns(pg_c, table_name, is_pg=True)
     
-    s_c.execute("SELECT id, nome FROM funcionarios")
-    s_emp_id_to_name = {r[0]: r[1] for r in s_c.fetchall()}
-    s_emp_name_to_id = {v: k for k, v in s_emp_id_to_name.items()}
-    
-    s_c.execute('''SELECT guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, last_modified, origem_registo FROM movimentos''')
-    s_movs = {}
-    for r in s_c.fetchall():
-        s_movs[r[0]] = {
-            'tipo': r[1], 'equipamento': r[2], 'origem_destino': r[3], 'motivo': r[4], 'data': r[5],
-            'status': r[6], 'tecnico': r[7], 'relatorio': r[8], 'emp_name': s_emp_id_to_name.get(r[9], ''),
-            'numero_serie': r[10], 'marca': r[11], 'entregue_por': r[12], 'recebido_por': r[13],
-            'agente_protecao': r[14], 'fornecedor': r[15], 'quantidade': r[16], 'last_modified': r[17],
-            'origem_registo': r[18]
-        }
-        
-    pg_conn = get_pg_connection()
-    if not pg_conn:
-        s_conn.close()
-        return False
-    pg_c = pg_conn.cursor()
-    
-    pg_c.execute("SELECT id, nome FROM funcionarios")
-    pg_emp_id_to_name = {r[0]: r[1] for r in pg_c.fetchall()}
-    pg_emp_name_to_id = {v: k for k, v in pg_emp_id_to_name.items()}
-    
-    pg_c.execute('''SELECT guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, last_modified, origem_registo FROM movimentos''')
-    pg_movs = {}
-    for r in pg_c.fetchall():
-        pg_movs[r[0]] = {
-            'tipo': r[1], 'equipamento': r[2], 'origem_destino': r[3], 'motivo': r[4], 'data': r[5],
-            'status': r[6], 'tecnico': r[7], 'relatorio': r[8], 'emp_name': pg_emp_id_to_name.get(r[9], ''),
-            'numero_serie': r[10], 'marca': r[11], 'entregue_por': r[12], 'recebido_por': r[13],
-            'agente_protecao': r[14], 'fornecedor': r[15], 'quantidade': r[16], 'last_modified': r[17],
-            'origem_registo': r[18]
-        }
-        
-    for guia, s_m in s_movs.items():
-        pg_emp_id = pg_emp_name_to_id.get(s_m['emp_name'])
-        if guia not in pg_movs:
-            pg_c.execute('''INSERT INTO movimentos 
-                (guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, last_modified, origem_registo) 
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
-                (guia, s_m['tipo'], s_m['equipamento'], s_m['origem_destino'], s_m['motivo'], s_m['data'],
-                 s_m['status'], s_m['tecnico'], s_m['relatorio'], pg_emp_id, s_m['numero_serie'], s_m['marca'],
-                 s_m['entregue_por'], s_m['recebido_por'], s_m['agente_protecao'], s_m['fornecedor'], s_m['quantidade'], s_m['last_modified'], s_m['origem_registo']))
-        elif s_m['last_modified'] > pg_movs[guia]['last_modified']:
-            pg_c.execute('''UPDATE movimentos SET 
-                tipo=%s, equipamento=%s, origem_destino=%s, motivo=%s, data=%s, status=%s, tecnico=%s, relatorio=%s, 
-                funcionario_id=%s, numero_serie=%s, marca=%s, entregue_por=%s, recebido_por=%s, agente_protecao=%s, 
-                fornecedor=%s, quantidade=%s, last_modified=%s, origem_registo=%s WHERE guia=%s''',
-                (s_m['tipo'], s_m['equipamento'], s_m['origem_destino'], s_m['motivo'], s_m['data'],
-                 s_m['status'], s_m['tecnico'], s_m['relatorio'], pg_emp_id, s_m['numero_serie'], s_m['marca'],
-                 s_m['entregue_por'], s_m['recebido_por'], s_m['agente_protecao'], s_m['fornecedor'], s_m['quantidade'], s_m['last_modified'], s_m['origem_registo'], guia))
-                 
-    for guia, pg_m in pg_movs.items():
-        s_emp_id = s_emp_name_to_id.get(pg_m['emp_name'])
-        if guia not in s_movs:
-            s_c.execute('''INSERT INTO movimentos 
-                (guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, last_modified, origem_registo) 
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                (guia, pg_m['tipo'], pg_m['equipamento'], pg_m['origem_destino'], pg_m['motivo'], pg_m['data'],
-                 pg_m['status'], pg_m['tecnico'], pg_m['relatorio'], s_emp_id, pg_m['numero_serie'], pg_m['marca'],
-                 pg_m['entregue_por'], pg_m['recebido_por'], pg_m['agente_protecao'], pg_m['fornecedor'], pg_m['quantidade'], pg_m['last_modified'], pg_m['origem_registo']))
-        elif pg_m['last_modified'] > s_movs[guia]['last_modified']:
-            s_c.execute('''UPDATE movimentos SET 
-                tipo=?, equipamento=?, origem_destino=?, motivo=?, data=?, status=?, tecnico=?, relatorio=?, 
-                funcionario_id=?, numero_serie=?, marca=?, entregue_por=?, recebido_por=?, agente_protecao=?, 
-                fornecedor=?, quantidade=?, last_modified=?, origem_registo=? WHERE guia=?''',
-                (pg_m['tipo'], pg_m['equipamento'], pg_m['origem_destino'], pg_m['motivo'], pg_m['data'],
-                 pg_m['status'], pg_m['tecnico'], pg_m['relatorio'], s_emp_id, pg_m['numero_serie'], pg_m['marca'],
-                 pg_m['entregue_por'], pg_m['recebido_por'], pg_m['agente_protecao'], pg_m['fornecedor'], pg_m['quantidade'], pg_m['last_modified'], pg_m['origem_registo'], guia))
-                 
-    pg_conn.commit()
-    pg_conn.close()
-    s_conn.commit()
-    s_conn.close()
-    return True
-
-def sync_inventario_local():
-    s_conn = sqlite3.connect(DB_PATH)
-    s_c = s_conn.cursor()
-    s_c.execute("SELECT equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo FROM inventario_local")
-    s_items = {}
-    for r in s_c.fetchall():
-        key = f"{r[0]}::{r[1]}::{r[2]}"
-        s_items[key] = {
-            'equipamento': r[0], 'marca': r[1], 'numero_serie': r[2], 'quantidade': r[3], 'status': r[4],
-            'data_registo': r[5], 'observacoes': r[6], 'last_modified': r[7], 'origem_registo': r[8]
-        }
-        
-    pg_conn = get_pg_connection()
-    if not pg_conn:
-        s_conn.close()
-        return False
-    pg_c = pg_conn.cursor()
-    pg_c.execute("SELECT equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo FROM inventario_local")
-    pg_items = {}
-    for r in pg_c.fetchall():
-        key = f"{r[0]}::{r[1]}::{r[2]}"
-        pg_items[key] = {
-            'equipamento': r[0], 'marca': r[1], 'numero_serie': r[2], 'quantidade': r[3], 'status': r[4],
-            'data_registo': r[5], 'observacoes': r[6], 'last_modified': r[7], 'origem_registo': r[8]
-        }
-        
-    for key, s_i in s_items.items():
-        if key not in pg_items:
-            pg_c.execute('''INSERT INTO inventario_local 
-                (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo) 
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
-                (s_i['equipamento'], s_i['marca'], s_i['numero_serie'], s_i['quantidade'], s_i['status'], s_i['data_registo'], s_i['observacoes'], s_i['last_modified'], s_i['origem_registo']))
-        elif s_i['last_modified'] > pg_items[key]['last_modified']:
-            pg_c.execute('''UPDATE inventario_local SET 
-                quantidade=%s, status=%s, data_registo=%s, observacoes=%s, last_modified=%s, origem_registo=%s 
-                WHERE equipamento=%s AND marca=%s AND numero_serie=%s''',
-                (s_i['quantidade'], s_i['status'], s_i['data_registo'], s_i['observacoes'], s_i['last_modified'], s_i['origem_registo'], s_i['equipamento'], s_i['marca'], s_i['numero_serie']))
+    for col in s_cols:
+        if col not in pg_cols:
+            print(f"[*] Nova coluna detetada localmente: Adicionando '{col}' à tabela '{table_name}' na Nuvem.")
+            try:
+                pg_c.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} VARCHAR")
+            except Exception as e:
+                print(f"[-] Erro ao adicionar '{col}' ao PG: {e}")
                 
-    for key, pg_i in pg_items.items():
-        if key not in s_items:
-            s_c.execute('''INSERT INTO inventario_local 
-                (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo) 
-                VALUES (?,?,?,?,?,?,?,?,?)''',
-                (pg_i['equipamento'], pg_i['marca'], pg_i['numero_serie'], pg_i['quantidade'], pg_i['status'], pg_i['data_registo'], pg_i['observacoes'], pg_i['last_modified'], pg_i['origem_registo']))
-        elif pg_i['last_modified'] > s_items[key]['last_modified']:
-            s_c.execute('''UPDATE inventario_local SET 
-                quantidade=?, status=?, data_registo=?, observacoes=?, last_modified=?, origem_registo=? 
-                WHERE equipamento=? AND marca=? AND numero_serie=?''',
-                (pg_i['quantidade'], pg_i['status'], pg_i['data_registo'], pg_i['observacoes'], pg_i['last_modified'], pg_i['origem_registo'], pg_i['equipamento'], pg_i['marca'], pg_i['numero_serie']))
-                
-    pg_conn.commit()
-    pg_conn.close()
-    s_conn.commit()
-    s_conn.close()
-    return True
+    for col in pg_cols:
+        if col not in s_cols:
+            print(f"[*] Nova coluna detetada na Nuvem: Adicionando '{col}' à tabela '{table_name}' localmente.")
+            try:
+                s_c.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} TEXT")
+            except Exception as e:
+                print(f"[-] Erro ao adicionar '{col}' ao SQLite: {e}")
+
+def get_common_columns(s_c, pg_c, table_name):
+    s_cols = get_table_columns(s_c, table_name, is_pg=False)
+    pg_cols = get_table_columns(pg_c, table_name, is_pg=True)
+    return [c for c in s_cols if c in pg_cols]
+
+def get_records_dict(cursor, table_name, columns, unique_keys, is_pg=False):
+    cols_str = ", ".join(columns)
+    if is_pg:
+        cursor.execute(f"SELECT {cols_str} FROM {table_name}")
+    else:
+        cursor.execute(f"SELECT {cols_str} FROM {table_name}")
+        
+    records = cursor.fetchall()
+    res = {}
+    for r in records:
+        d = dict(zip(columns, r))
+        key = tuple(str(d.get(k, '')) for k in unique_keys)
+        res[key] = d
+    return res
+
+def sync_table_dynamic(s_conn, pg_conn, table_name, unique_keys):
+    s_c = s_conn.cursor()
+    pg_c = pg_conn.cursor()
+    
+    sync_schema_dynamic(s_c, pg_c, table_name)
+    columns = get_common_columns(s_c, pg_c, table_name)
+    
+    if 'last_modified' not in columns or 'origem_registo' not in columns:
+        print(f"[-] Sincronização ignorada para '{table_name}': Faltam as colunas de controlo.")
+        return
+        
+    s_records = get_records_dict(s_c, table_name, columns, unique_keys, is_pg=False)
+    pg_records = get_records_dict(pg_c, table_name, columns, unique_keys, is_pg=True)
+    
+    for key, s_rec in s_records.items():
+        if key not in pg_records:
+            cols = list(s_rec.keys())
+            vals = list(s_rec.values())
+            placeholders = ", ".join(["%s"] * len(cols))
+            cols_str = ", ".join(cols)
+            pg_c.execute(f"INSERT INTO {table_name} ({cols_str}) VALUES ({placeholders})", vals)
+        elif str(s_rec.get('last_modified', '')) > str(pg_records[key].get('last_modified', '')):
+            cols = list(s_rec.keys())
+            vals = list(s_rec.values())
+            set_str = ", ".join([f"{c}=%s" for c in cols])
+            where_str = " AND ".join([f"{k}=%s" for k in unique_keys])
+            where_vals = [s_rec[k] for k in unique_keys]
+            pg_c.execute(f"UPDATE {table_name} SET {set_str} WHERE {where_str}", vals + where_vals)
+            
+    for key, pg_rec in pg_records.items():
+        if key not in s_records:
+            cols = list(pg_rec.keys())
+            vals = list(pg_rec.values())
+            placeholders = ", ".join(["?"] * len(cols))
+            cols_str = ", ".join(cols)
+            s_c.execute(f"INSERT INTO {table_name} ({cols_str}) VALUES ({placeholders})", vals)
+        elif str(pg_rec.get('last_modified', '')) > str(s_records[key].get('last_modified', '')):
+            cols = list(pg_rec.keys())
+            vals = list(pg_rec.values())
+            set_str = ", ".join([f"{c}=?" for c in cols])
+            where_str = " AND ".join([f"{k}=?" for k in unique_keys])
+            where_vals = [pg_rec[k] for k in unique_keys]
+            s_c.execute(f"UPDATE {table_name} SET {set_str} WHERE {where_str}", vals + where_vals)
 
 def sync_databases():
     if is_cloud_mode():
         return True
-    conn = get_pg_connection()
-    if not conn:
+    
+    pg_conn = get_pg_connection()
+    if not pg_conn:
         print("[-] Sincronização cancelada: PostgreSQL Cloud inacessível.")
         return False
-    conn.close()
-    
-    print("[*] A iniciar sincronização bidirecional...")
-    try:
-        for table in ['setores', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes']:
-            sync_lookup_table(table)
-            
-        sync_users()
-        sync_funcionarios()
-        sync_movimentos()
-        sync_inventario_local()
         
-        print("[+] Sincronização bidirecional concluída com sucesso!")
+    s_conn = sqlite3.connect(DB_PATH)
+    
+    print("[*] A iniciar Sincronização Dinâmica Bidirecional...")
+    try:
+        normalize_pg_schema(pg_conn.cursor())
+        pg_conn.commit()
+        
+        for table_name, unique_keys in SYNC_CONFIG.items():
+            sync_table_dynamic(s_conn, pg_conn, table_name, unique_keys)
+            
+        pg_conn.commit()
+        s_conn.commit()
+        print("[+] Sincronização Dinâmica Bidirecional concluída com sucesso!")
         return True
     except Exception as e:
         print(f"[-] Erro durante a sincronização: {e}")
         return False
+    finally:
+        pg_conn.close()
+        s_conn.close()
+
 init_db()
 
 if __name__ == '__main__':
