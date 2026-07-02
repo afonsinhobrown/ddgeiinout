@@ -11,6 +11,22 @@ from reportlab.lib.utils import ImageReader
 import hashlib
 import io
 import psycopg2
+import socket
+
+def generate_guia(tipo, cursor):
+    # Try to get MACHINE_ID from environment, fallback to hostname hash
+    mid = os.environ.get("MACHINE_ID")
+    if not mid:
+        try:
+            hostname = socket.gethostname() or "default"
+        except Exception:
+            hostname = "default"
+        mid = hashlib.md5(hostname.encode()).hexdigest().upper()[:4]
+    else:
+        mid = mid.strip().upper()[:4]
+        
+    count = len(cursor.execute('SELECT id FROM movimentos').fetchall()) + 1
+    return f"{tipo}-{datetime.now().year}-{mid}-{count:04d}"
 
 # ---------------------------------------------------------
 # HYBRID DATABASE WRAPPER FOR SEAMLESS CLOUD/LOCAL DEPLOYMENT
@@ -27,15 +43,15 @@ class PGCursorWrapper:
     def __init__(self, pg_cursor):
         self.pg_cursor = pg_cursor
     def execute(self, query, params=None):
-        # Translate query placeholders from ? to %s and column names from setor_id to sector_id
-        translated_query = query.replace('?', '%s').replace('setor_id', 'sector_id')
+        # Translate query placeholders from ? to %s and column names from setor_id to setor_id
+        translated_query = query.replace('?', '%s').replace('setor_id', 'setor_id')
         if params is not None:
             self.pg_cursor.execute(translated_query, params)
         else:
             self.pg_cursor.execute(translated_query)
         return self
     def executemany(self, query, seq_of_params):
-        translated_query = query.replace('?', '%s').replace('setor_id', 'sector_id')
+        translated_query = query.replace('?', '%s').replace('setor_id', 'setor_id')
         self.pg_cursor.executemany(translated_query, seq_of_params)
         return self
     def fetchone(self):
@@ -113,7 +129,7 @@ def check_and_auto_migrate():
             old.execute("SELECT id, nome FROM sectores")
             setores = old.fetchall()
             
-            old.execute("SELECT id, nome, cargo, sector_id FROM funcionarios")
+            old.execute("SELECT id, nome, cargo, setor_id FROM funcionarios")
             funcionarios = old.fetchall()
             
             old.execute("SELECT id, numero_guia, tipo, equipamento_id, quantidade, origem_destino, motivo, data_movimento, status, relatorio_reparacao, tecnico_responsavel, funcionario_entrega_id FROM movimentos")
@@ -190,6 +206,14 @@ def check_db_integrity(c):
         if 'agente_protecao' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN agente_protecao TEXT")
         if 'fornecedor' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN fornecedor TEXT")
         if 'quantidade' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN quantidade TEXT")
+        if 'setor_origem_id' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN setor_origem_id INTEGER")
+        if 'setor_destino_id' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN setor_destino_id INTEGER")
+        
+        c.execute("PRAGMA table_info(users)")
+        u_cols = [row[1] for row in c.fetchall()]
+        if 'setor_id' not in u_cols: 
+            c.execute("ALTER TABLE users ADD COLUMN setor_id INTEGER")
+            c.execute("UPDATE users SET setor_id = 1 WHERE perfil != 'admin' AND setor_id IS NULL")
         
         tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local']
         for t in tables:
@@ -405,12 +429,43 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
     <div class="container">
         {% if msg %}<div style="background:#dcfce3; color:#166534; padding:1rem; border-radius:0.5rem; margin-bottom:1rem;">{{msg}}</div>{% endif %}
         
-        <div style="display:flex; gap:1rem; margin-bottom:2rem; justify-content:center; flex-wrap:wrap">
+        
+        <!-- PENDENTES_BLOCK_ADDED -->
+        {% if pendentes %}
+        <div class="card" style="border: 2px solid #f59e0b; background: #fffbeb;">
+            <h3 style="color:#d97706; margin-bottom:1rem;">⚠️ Equipamentos Pendentes de Receção ({{pendentes|length}})</h3>
+            <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+                <tr style="background:#fef3c7; text-align:left; color:#b45309;">
+                    <th style="padding:0.5rem">GUIA</th>
+                    <th style="padding:0.5rem">EQUIPAMENTO</th>
+                    <th style="padding:0.5rem">ORIGEM</th>
+                    <th style="padding:0.5rem">QTD</th>
+                    <th style="padding:0.5rem">AÇÃO</th>
+                </tr>
+                {% for p in pendentes %}
+                <tr style="border-bottom:1px solid #fde68a;">
+                    <td style="padding:0.5rem"><strong>{{p.guia}}</strong></td>
+                    <td style="padding:0.5rem">{{p.equipamento}} ({{p.marca}}) S/N: {{p.numero_serie}}</td>
+                    <td style="padding:0.5rem">{{p.origem_destino}}</td>
+                    <td style="padding:0.5rem">{{p.quantidade}}</td>
+                    <td style="padding:0.5rem; display:flex; gap:0.5rem;">
+                        <form method="POST" action="/confirmar_recepcao/{{p.guia}}" style="display:inline;"><button class="btn btn-green" style="padding:0.3rem 0.6rem; font-size:0.8rem">✅ Confirmar</button></form>
+                        <form method="POST" action="/rejeitar_recepcao/{{p.guia}}" style="display:inline;"><button class="btn btn-danger" style="padding:0.3rem 0.6rem; font-size:0.8rem">❌ Rejeitar</button></form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+        {% endif %}
+    <div style="display:flex; gap:1rem; margin-bottom:2rem; justify-content:center; flex-wrap:wrap">
             <button onclick="show('ent')" class="btn btn-green">📥 Entrada</button>
             <button onclick="show('sai')" class="btn btn-blue">📤 Saída</button>
             <a href="/inventario" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📦 Inventário DDGEI</a>
-            <a href="/relatorios" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📊 Dashboard de Relatórios</a>
-            <a href="/cadastros" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">⚙️ Cadastros</a>
+            <a href="/movimentos" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📋 Todos os Movimentos</a>
+            {% if session.perfil == 'admin' %}
+            <a href=\"/relatorios\" class=\"btn btn-outline\" style=\"background:#e2e8f0; color:#0f172a\"> 📊 Dashboard de Relatórios</a>
+            <a href=\"/cadastros\" class=\"btn btn-outline\" style=\"background:#e2e8f0; color:#0f172a\"> ⚙️ Cadastros</a>
+            {% endif %}
             <button id="syncBtn" onclick="syncCloud()" class="btn btn-outline" style="margin-left:auto; font-weight:bold; background:#10b981; color:white; border:none; cursor:pointer; display:flex; align-items:center; gap:0.5rem; padding:0.5rem 1rem; border-radius:0.5rem; transition: all 0.3s;">
                 🔄 Sincronizar Nuvem
             </button>
@@ -440,7 +495,7 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                         <select name="origem" required>
                             <option value="">-- Selecione --</option>
                             <optgroup label="Setores Internos">
-                                {% for s in setores %}<option value="Interno - {{s.nome}}">{{s.nome}}</option>{% endfor %}
+                                {% for s in setores %}<option value="SETOR_{{s.id}}">{{s.nome}}</option>{% endfor %}
                             </optgroup>
                             <optgroup label="Instituições Externas">
                                 {% for i in instituicoes %}<option value="Externo - {{i.nome}}">{{i.nome}}</option>{% endfor %}
@@ -513,7 +568,7 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                         <select name="destino" required>
                             <option value="">-- Selecione --</option>
                             <optgroup label="Setores Internos">
-                                {% for s in setores %}<option value="Interno - {{s.nome}}">{{s.nome}}</option>{% endfor %}
+                                {% for s in setores %}<option value="SETOR_{{s.id}}">{{s.nome}}</option>{% endfor %}
                             </optgroup>
                             <optgroup label="Instituições Externas">
                                 {% for i in instituicoes %}<option value="Externo - {{i.nome}}">{{i.nome}}</option>{% endfor %}
@@ -1034,6 +1089,10 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         <option value="tecnico">Técnico</option>
                         <option value="protecao">Protecção</option>
                     </select>
+                    <select name="setor_id">
+                        <option value="">Selecione o Setor (Opcional)</option>
+                        {% for s in setores %}<option value="{{s.id}}">{{s.nome}}</option>{% endfor %}
+                    </select>
                     <button class="btn" style="background:#1e293b; color:white; margin-top:1rem; width:100%">Salvar Usuário</button>
                 </form>
                 <h4 style="margin-top:2rem">Usuários do Sistema</h4>
@@ -1046,7 +1105,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                                 <small style="color:#64748b;">{{u.username}} ({{u.perfil}})</small>
                             </div>
                             <div style="display:flex; gap:0.25rem; align-items:center;">
-                                <button onclick="openEdit('/edit_user/{{u.id}}', 'Editar Usuário', [{label:'Nome Completo', name:'nome_completo', type:'text', value:'{{u.nome_completo}}', required:true}, {label:'Username', name:'username', type:'text', value:'{{u.username}}', required:true}, {label:'Perfil', name:'perfil', type:'select', value:'{{u.perfil}}', options:[{value:'admin',text:'Administrador'},{value:'tecnico',text:'Técnico'},{value:'protecao',text:'Protecção'}]}, {label:'Nova Senha (Opcional)', name:'password', type:'password', value:'', required:false}])" class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem">Editar</button>
+                                <button onclick="openEdit('/edit_user/{{u.id}}', 'Editar Usuário', [{label:'Nome Completo', name:'nome_completo', type:'text', value:'{{u.nome_completo}}', required:true}, {label:'Username', name:'username', type:'text', value:'{{u.username}}', required:true}, {label:'Perfil', name:'perfil', type:'select', value:'{{u.perfil}}', options:[{value:'admin',text:'Administrador'},{value:'tecnico',text:'Técnico'},{value:'protecao',text:'Protecção'}]}, {label:'Setor', name:'setor_id', type:'select', value:'{{u.setor_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for s in setores %}{value:'{{s.id}}',text:'{{s.nome}}'},{% endfor %}]}, {label:'Nova Senha (Opcional)', name:'password', type:'password', value:'', required:false}])" class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem">Editar</button>
                                 <form method="POST" action="/delete_user/{{u.id}}" style="display:inline;" onsubmit="return confirm('Tem certeza que deseja remover este usuário?');">
                                     <button class="btn btn-danger" style="padding:0.2rem 0.5rem; font-size:0.8rem">Remover</button>
                                 </form>
@@ -1228,6 +1287,32 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
     .stat-card { background: white; padding: 1.5rem; border-radius: 0.75rem; border: 1px solid var(--border); text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
     .stat-number { font-size: 2rem; font-weight: bold; color: var(--primary); margin-top: 0.5rem; }
     .card table td { border-bottom: 1px solid #f1f5f9; padding: 0.75rem 0.5rem; }
+    
+    .pagination-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 1.5rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
+    }
+    .pagination-btn {
+        background: white;
+        border: 1px solid var(--border);
+        padding: 0.4rem 0.8rem;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+    .pagination-btn:hover:not(:disabled) {
+        background: #f8fafc;
+        border-color: #cbd5e1;
+    }
+    .pagination-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
 </style>
 </head>
 <body>
@@ -1236,7 +1321,7 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
         <div>
             <button id="syncBtn" onclick="syncCloud()" class="btn btn-outline" style="background:#10b981; color:white; border:none; margin-right:1rem; padding: 0.4rem 0.8rem; font-weight:bold; cursor:pointer; transition: all 0.3s;">🔄 Sincronizar Nuvem</button>
             <a href="/" class="btn btn-outline" style="background:white; color:#0f172a; margin-right:1.5rem; padding: 0.4rem 0.8rem;">⬅️ Voltar ao Início</a>
-            <span>👤 {{session.nome}}</span>
+            <span>👤 {{session.username}}</span>
         </div>
     </div>
     <div class="container">
@@ -1260,6 +1345,45 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                 <div class="stat-number" style="color: #ef4444;">{{ stats.danificados }}</div>
             </div>
         </div>
+
+        <!-- Pending Confirmation Panel -->
+        {% if pending_items %}
+        <div class="card" style="margin-bottom: 2rem; border: 2px solid #fed7aa; background: #fffbeb;">
+            <h3 style="color: #ea580c; display: flex; align-items: center; gap: 0.5rem;">📥 Equipamentos Pendentes de Receção</h3>
+            <div style="overflow-x: auto; margin-top: 1rem;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: #ffedd5; text-align: left; color: #ea580c; font-size: 0.8rem">
+                            <th style="padding: 0.75rem">EQUIPAMENTO</th>
+                            <th style="padding: 0.75rem">MARCA</th>
+                            <th style="padding: 0.75rem">S/N</th>
+                            <th style="padding: 0.75rem">QUANTIDADE</th>
+                            <th style="padding: 0.75rem">GUIA DE ORIGEM</th>
+                            <th style="padding: 0.75rem">SETOR DE ORIGEM</th>
+                            <th style="padding: 0.75rem; text-align: right;">AÇÕES</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p_item in pending_items %}
+                        <tr style="border-bottom: 1px solid #fed7aa">
+                            <td style="padding: 0.75rem; font-weight: 600;">{{ p_item.equipamento }}</td>
+                            <td style="padding: 0.75rem">{{ p_item.marca }}</td>
+                            <td style="padding: 0.75rem; font-family: monospace;">{{ p_item.numero_serie }}</td>
+                            <td style="padding: 0.75rem; font-weight: bold; text-align: center;">{{ p_item.quantidade }}</td>
+                            <td style="padding: 0.75rem; font-weight: bold; color: #475569;">{{ p_item.guia_origem or '-' }}</td>
+                            <td style="padding: 0.75rem; color: #64748b;">{{ p_item.setor_nome or 'Desconhecido' }}</td>
+                            <td style="padding: 0.75rem; text-align: right;">
+                                <form method="POST" action="/inventario/confirmar_rececao/{{ p_item.id }}" style="display:inline;">
+                                    <button class="btn btn-green" style="margin-top:0; padding: 0.3rem 0.8rem; font-weight: bold; font-size: 0.8rem;">Confirmar Receção</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
 
         <div style="display: grid; grid-template-columns: 350px 1fr; gap: 1.5rem; align-items: start;">
             <div class="card">
@@ -1288,6 +1412,13 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                         <input name="quantidade" type="number" min="1" value="1" required style="margin-top: 0.25rem;">
                     </div>
                     <div>
+                        <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Setor Pertencente</label>
+                        <select name="setor_id" required style="margin-top: 0.25rem;">
+                            <option value="">-- Selecione o Setor --</option>
+                            {% for s in setores %}<option value="{{s.id}}" {% if session.setor_id == s.id %}selected{% endif %}>{{s.nome}}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
                         <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Status Inicial</label>
                         <select name="status" required style="margin-top: 0.25rem;">
                             <option value="Disponível">Disponível</option>
@@ -1306,49 +1437,45 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
 
             <div class="card">
                 <h3>Equipamentos em Stock</h3>
-                <input type="text" id="invSearchInput" onkeyup="searchInvTable()" placeholder="Pesquisar por equipamento, marca ou S/N..." style="width:100%; padding:0.8rem; margin-top:1rem; border:1px solid #cbd5e1; border-radius:4px; margin-bottom:1rem">
+                
+                <!-- Bulk Actions -->
+                <div style="display:flex; justify-content: space-between; align-items:center; margin-top: 1rem; margin-bottom: 1rem; gap: 0.5rem; flex-wrap: wrap;">
+                    <div style="display:flex; gap: 0.5rem;">
+                        <button onclick="abrirTransferenciaMultiplos()" class="btn btn-blue" style="margin-top:0; font-size: 0.85rem;">📁 Transferir Selecionados</button>
+                        <button onclick="apagarSelecionados()" class="btn btn-danger" style="margin-top:0; font-size: 0.85rem;">🗑️ Apagar Selecionados</button>
+                    </div>
+                    {% if session.perfil == 'admin' %}
+                    <form method="POST" action="/inventario/delete_all" onsubmit="return confirm('ATENÇÃO: Isto irá apagar TODOS os equipamentos do inventário permanentemente. Continuar?');">
+                        <button class="btn btn-danger" style="margin-top:0; background:#dc2626; font-size: 0.85rem;">⚠️ Apagar Todo o Inventário</button>
+                    </form>
+                    {% endif %}
+                </div>
+
+                <input type="text" id="invSearchInput" onkeyup="searchInvTable()" placeholder="Pesquisar por equipamento, marca ou S/N..." style="width:100%; padding:0.8rem; border:1px solid #cbd5e1; border-radius:4px; margin-bottom:1rem">
+                
                 <table id="invTable" style="width:100%; border-collapse:collapse;">
                     <thead>
                         <tr style="background:#f1f5f9; text-align:left; color:#64748b; font-size:0.8rem">
+                            <th style="padding:0.75rem; width: 30px;"><input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAll(this)"></th>
                             <th style="padding:0.75rem">EQUIPAMENTO</th>
                             <th style="padding:0.75rem">MARCA</th>
                             <th style="padding:0.75rem">S/N</th>
                             <th style="padding:0.75rem">QUANTIDADE</th>
+                            <th style="padding:0.75rem">SETOR</th>
                             <th style="padding:0.75rem">STATUS</th>
-                            <th style="padding:0.75rem">OBSERVAÇÕES</th>
                             <th style="padding:0.75rem; text-align: right;">ACÇÕES</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        {% for item in items %}
-                        <tr style="border-bottom:1px solid var(--border)">
-                            <td style="padding:0.75rem; font-weight: 600;">{{ item.equipamento }}</td>
-                            <td style="padding:0.75rem">{{ item.marca }}</td>
-                            <td style="padding:0.75rem; font-family: monospace;">{{ item.numero_serie }}</td>
-                            <td style="padding:0.75rem; text-align: center; font-weight: bold;">{{ item.quantidade }}</td>
-                            <td style="padding:0.75rem">
-                                {% if item.status in ['Disponível'] %}
-                                <span style="background:#dcfce3; color:#166534; padding:0.25rem 0.5rem; border-radius:0.25rem; font-size:0.8rem; font-weight:600;">{{ item.status }}</span>
-                                {% elif item.status in ['Em uso'] %}
-                                <span style="background:#dbeafe; color:#1e40af; padding:0.25rem 0.5rem; border-radius:0.25rem; font-size:0.8rem; font-weight:600;">{{ item.status }}</span>
-                                {% else %}
-                                <span style="background:#fee2e2; color:#991b1b; padding:0.25rem 0.5rem; border-radius:0.25rem; font-size:0.8rem; font-weight:600;">{{ item.status }}</span>
-                                {% endif %}
-                            </td>
-                            <td style="padding:0.75rem; font-size:0.85rem; color:#64748b;">{{ item.observacoes or '-' }}</td>
-                            <td style="padding:0.75rem; text-align: right; display:flex; gap:0.25rem; justify-content: flex-end; align-items: center;">
-                                {% if item.quantidade > 0 and item.status == 'Disponível' %}
-                                <button onclick="abrirSaidaRapidaInventario({{ item.id }})" class="btn btn-green" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;">Saída</button>
-                                {% endif %}
-                                <button onclick="editarItemInventario({{ item|tojson|forceescape }})" class="btn btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;">Editar</button>
-                                <form method="POST" action="/inventario/delete/{{ item.id }}" style="display:inline;" onsubmit="return confirm('Deseja remover este item do inventário?');">
-                                    <button class="btn btn-danger" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;">Remover</button>
-                                </form>
-                            </td>
-                        </tr>
-                        {% endfor %}
+                    <tbody id="invTableBody">
+                        <!-- Filled by JS -->
                     </tbody>
                 </table>
+
+                <div class="pagination-nav">
+                    <button id="btnPrevPage" onclick="changePage(-1)" class="pagination-btn">⬅️ Anterior</button>
+                    <span id="pageIndicator" style="font-weight: 600; color: #475569; font-size: 0.9rem;">Página 1 de 1</span>
+                    <button id="btnNextPage" onclick="changePage(1)" class="pagination-btn">Próximo ➡️</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1377,6 +1504,12 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                 <div>
                     <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Quantidade em Stock</label>
                     <input name="quantidade" id="ei_quantidade" type="number" min="0" required>
+                </div>
+                <div>
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Setor Pertencente</label>
+                    <select name="setor_id" id="ei_setor_id" required>
+                        {% for s in setores %}<option value="{{s.id}}">{{s.nome}}</option>{% endfor %}
+                    </select>
                 </div>
                 <div>
                     <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Status</label>
@@ -1418,7 +1551,7 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                         <select name="destino" required>
                             <option value="">-- Selecione o Destino --</option>
                             <optgroup label="Setores Internos">
-                                {% for s in setores %}<option value="Interno - {{s.nome}}">{{s.nome}}</option>{% endfor %}
+                                {% for s in setores %}<option value="SETOR_{{s.id}}">{{s.nome}}</option>{% endfor %}
                             </optgroup>
                             <optgroup label="Instituições Externas">
                                 {% for i in instituicoes %}<option value="Externo - {{i.nome}}">{{i.nome}}</option>{% endfor %}
@@ -1473,31 +1606,249 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
         </div>
     </div>
 
+    <!-- Modal de Transferência de Múltiplos Itens -->
+    <div id="transferModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; display:none; justify-content:center; align-items:center;">
+        <div class="card" style="width:500px; max-width:90%;">
+            <h3>📁 Transferir Equipamentos para Setor</h3>
+            <form id="transferForm" onsubmit="submeterTransferencia(event)" style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1rem;">
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Setor de Destino</label>
+                    <select id="trans_setor_destino_id" required>
+                        <option value="">-- Selecione o Setor --</option>
+                        {% for s in setores %}<option value="{{s.id}}">{{s.nome}}</option>{% endfor %}
+                    </select>
+                </div>
+                <div id="trans_items_container" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); padding: 0.5rem; border-radius: 4px; display:flex; flex-direction:column; gap:0.5rem;">
+                    <!-- Quantidades inputs dynamically loaded -->
+                </div>
+                <div style="display:flex; gap:1rem;">
+                    <div>
+                        <label style="font-weight:600; font-size:0.85rem; color:#475569;">Entregue por (Resp.)</label>
+                        <input type="text" id="trans_entregue_por" required style="padding:0.4rem;">
+                    </div>
+                    <div>
+                        <label style="font-weight:600; font-size:0.85rem; color:#475569;">Recebido por (Resp.)</label>
+                        <input type="text" id="trans_recebido_por" required style="padding:0.4rem;">
+                    </div>
+                </div>
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Motivo da Transferência</label>
+                    <input type="text" id="trans_motivo" required placeholder="Ex: Necessidade de serviço" style="padding:0.4rem;">
+                </div>
+                <div style="display:flex; gap:1rem; margin-top:0.5rem;">
+                    <button type="button" class="btn btn-outline" style="flex:1" onclick="fecharTransferModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-blue" style="flex:1">Confirmar Transferência</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
+        const allItems = {{ items|tojson }};
+        let filteredItems = [...allItems];
+        let currentPage = 1;
+        const pageSize = 10;
+        const selectedIds = new Set();
+
         function searchInvTable() {
-            var input, filter, table, tr, td, i, txtValue;
-            input = document.getElementById("invSearchInput");
-            filter = input.value.toUpperCase();
-            table = document.getElementById("invTable");
-            tr = table.getElementsByTagName("tr");
-            for (i = 1; i < tr.length; i++) {
-                td = tr[i].innerText;
-                if (td) {
-                    if (td.toUpperCase().indexOf(filter) > -1) {
-                        tr[i].style.display = "";
+            const query = document.getElementById("invSearchInput").value.toUpperCase();
+            filteredItems = allItems.filter(item => {
+                const text = `${item.equipamento} ${item.marca} ${item.numero_serie} ${item.status} ${item.setor_nome || ''}`.toUpperCase();
+                return text.indexOf(query) > -1;
+            });
+            currentPage = 1;
+            renderTable();
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById("invTableBody");
+            tbody.innerHTML = "";
+            
+            const startIdx = (currentPage - 1) * pageSize;
+            const endIdx = startIdx + pageSize;
+            const pageItems = filteredItems.slice(startIdx, endIdx);
+            
+            if (pageItems.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" style="padding:1.5rem; text-align:center; color:#64748b;">Nenhum equipamento correspondente encontrado.</td></tr>`;
+            } else {
+                pageItems.forEach(item => {
+                    let statusSpan = '';
+                    if (item.status === 'Disponível') {
+                        statusSpan = `<span style="background:#dcfce3; color:#166534; padding:0.25rem 0.5rem; border-radius:0.25rem; font-size:0.8rem; font-weight:600;">${item.status}</span>`;
+                    } else if (item.status === 'Em uso') {
+                        statusSpan = `<span style="background:#dbeafe; color:#1e40af; padding:0.25rem 0.5rem; border-radius:0.25rem; font-size:0.8rem; font-weight:600;">${item.status}</span>`;
                     } else {
-                        tr[i].style.display = "none";
+                        statusSpan = `<span style="background:#fee2e2; color:#991b1b; padding:0.25rem 0.5rem; border-radius:0.25rem; font-size:0.8rem; font-weight:600;">${item.status}</span>`;
                     }
+                    
+                    const isChecked = selectedIds.has(item.id) ? 'checked' : '';
+                    const actionSaida = (item.quantidade > 0 && item.status === 'Disponível') 
+                        ? `<button onclick="abrirSaidaRapidaInventario(${item.id})" class="btn btn-green" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;">Saída</button>` 
+                        : '';
+                        
+                    const tr = document.createElement("tr");
+                    tr.style.borderBottom = "1px solid var(--border)";
+                    tr.innerHTML = `
+                        <td style="padding:0.75rem;"><input type="checkbox" class="row-checkbox" value="${item.id}" data-qty="${item.quantidade}" ${isChecked} onclick="toggleSelectRow(this, ${item.id})"></td>
+                        <td style="padding:0.75rem; font-weight: 600;">${item.equipamento}</td>
+                        <td style="padding:0.75rem">${item.marca}</td>
+                        <td style="padding:0.75rem; font-family: monospace;">${item.numero_serie}</td>
+                        <td style="padding:0.75rem; text-align: center; font-weight: bold;">${item.quantidade}</td>
+                        <td style="padding:0.75rem; color:#475569;">${item.setor_nome || '-'}</td>
+                        <td style="padding:0.75rem">${statusSpan}</td>
+                        <td style="padding:0.75rem; text-align: right; display:flex; gap:0.25rem; justify-content: flex-end; align-items: center;">
+                            ${actionSaida}
+                            <button onclick="editarItemInventario(${item.id})" class="btn btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;">Editar</button>
+                            <form method="POST" action="/inventario/delete/${item.id}" style="display:inline;" onsubmit="return confirm('Deseja remover este item do inventário?');">
+                                <button class="btn btn-danger" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;">Remover</button>
+                            </form>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+            
+            // Update indicator and buttons state
+            const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+            document.getElementById("pageIndicator").innerText = `Página ${currentPage} de ${totalPages}`;
+            document.getElementById("btnPrevPage").disabled = (currentPage === 1);
+            document.getElementById("btnNextPage").disabled = (currentPage === totalPages);
+        }
+
+        function changePage(direction) {
+            currentPage += direction;
+            renderTable();
+        }
+
+        function toggleSelectAll(masterCheckbox) {
+            const boxes = document.querySelectorAll(".row-checkbox");
+            boxes.forEach(cb => {
+                cb.checked = masterCheckbox.checked;
+                const id = parseInt(cb.value);
+                if (masterCheckbox.checked) {
+                    selectedIds.add(id);
+                } else {
+                    selectedIds.delete(id);
                 }
+            });
+        }
+
+        function toggleSelectRow(checkbox, id) {
+            if (checkbox.checked) {
+                selectedIds.add(id);
+            } else {
+                selectedIds.delete(id);
             }
         }
 
-        function editarItemInventario(item) {
+        function apagarSelecionados() {
+            if (selectedIds.size === 0) {
+                alert("Nenhum item selecionado.");
+                return;
+            }
+            if (!confirm(`Deseja realmente remover os ${selectedIds.size} itens selecionados?`)) return;
+            
+            fetch("/inventario/delete_multiple", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: Array.from(selectedIds) })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (res.success) {
+                    window.location.reload();
+                } else {
+                    alert("Erro ao remover: " + res.error);
+                }
+            });
+        }
+
+        function abrirTransferenciaMultiplos() {
+            if (selectedIds.size === 0) {
+                alert("Selecione pelo menos um equipamento.");
+                return;
+            }
+            
+            const container = document.getElementById("trans_items_container");
+            container.innerHTML = "";
+            
+            selectedIds.forEach(id => {
+                const item = allItems.find(x => x.id === id);
+                if (item) {
+                    const rowDiv = document.createElement("div");
+                    rowDiv.style.display = "flex";
+                    rowDiv.style.justifyContent = "space-between";
+                    rowDiv.style.alignItems = "center";
+                    rowDiv.style.padding = "0.25rem 0";
+                    rowDiv.innerHTML = `
+                        <span style="font-size:0.85rem; font-weight:600;">${item.equipamento} (${item.marca} - SN: ${item.numero_serie})</span>
+                        <div style="display:flex; align-items:center; gap:0.5rem;">
+                            <span style="font-size:0.75rem; color:#64748b;">(Qtd disp: ${item.quantidade})</span>
+                            <input type="number" class="trans-qty" data-id="${item.id}" min="1" max="${item.quantidade}" value="1" style="width:60px; padding:0.2rem;">
+                        </div>
+                    `;
+                    container.appendChild(rowDiv);
+                }
+            });
+            
+            document.getElementById("transferModal").style.display = "flex";
+        }
+
+        function fecharTransferModal() {
+            document.getElementById("transferModal").style.display = "none";
+        }
+
+        function submeterTransferencia(e) {
+            e.preventDefault();
+            const sectorDestId = document.getElementById("trans_setor_destino_id").value;
+            const entregue = document.getElementById("trans_entregue_por").value;
+            const recebido = document.getElementById("trans_recebido_por").value;
+            const motivo = document.getElementById("trans_motivo").value;
+            
+            const qtyInputs = document.querySelectorAll(".trans-qty");
+            const quantities = {};
+            for (let input of qtyInputs) {
+                const id = input.getAttribute("data-id");
+                const qtyVal = parseInt(input.value);
+                const maxVal = parseInt(input.getAttribute("max"));
+                if (qtyVal > maxVal) {
+                    alert("A quantidade para transferir não pode exceder a quantidade disponível.");
+                    return;
+                }
+                quantities[id] = qtyVal;
+            }
+            
+            fetch("/inventario/movimentar_multiplos", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ids: Array.from(selectedIds),
+                    quantities: quantities,
+                    setor_destino_id: sectorDestId,
+                    entregue_por: entregue,
+                    recebido_por: recebido,
+                    motivo: motivo
+                })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (res.success) {
+                    window.location.reload();
+                } else {
+                    alert("Erro na transferência: " + res.error);
+                }
+            });
+        }
+
+        function editarItemInventario(id) {
+            const item = allItems.find(x => x.id === id);
+            if (!item) return;
             document.getElementById('editInvForm').action = `/inventario/edit/${item.id}`;
             document.getElementById('ei_equipamento').value = item.equipamento;
             document.getElementById('ei_marca').value = item.marca;
             document.getElementById('ei_numero_serie').value = item.numero_serie;
             document.getElementById('ei_quantidade').value = item.quantidade;
+            document.getElementById('ei_setor_id').value = item.setor_id || '';
             document.getElementById('ei_status').value = item.status;
             document.getElementById('ei_observacoes').value = item.observacoes || '';
             document.getElementById('editInvModal').style.display = 'flex';
@@ -1546,6 +1897,9 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
         function fecharSaidaRapidaInv() {
             document.getElementById('saidaRapidaInvModal').style.display = 'none';
         }
+
+        // Initial table load
+        renderTable();
     </script>
 </body></html>'''
 
@@ -1562,13 +1916,14 @@ def login():
         p = hashlib.md5(request.form['password'].encode()).hexdigest()
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute("SELECT perfil, nome_completo FROM users WHERE username=? AND password=?", (u, p))
+        c.execute("SELECT perfil, nome_completo, setor_id FROM users WHERE username=? AND password=?", (u, p))
         res = c.fetchone()
         conn.close()
         if res:
             session['username'] = u
             session['perfil'] = res[0]
             session['nome_completo'] = res[1] or u
+            session['setor_id'] = res[2]
             return redirect(url_for('index'))
     return render_template_string(LOGIN_TEMPLATE)
 
@@ -1577,25 +1932,178 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
+
+@app.before_request
+def check_permissions():
+    if request.endpoint in ('login', 'static', 'api_sync') or request.endpoint is None:
+        return
+        
+    if 'username' not in session:
+        return redirect(url_for('login'))
+        
+    admin_only_endpoints = [
+        'cadastros', 'add_motivo', 'add_fornecedor', 'add_instituicao', 
+        'add_marca', 'add_tipo', 'add_setor', 'add_funcionario', 'add_user',
+        'relatorios', 'relatorios_export', 'eliminar_movimento'
+    ]
+    
+    if request.endpoint in admin_only_endpoints:
+        if session.get('perfil') != 'admin':
+            return "Erro: Acesso negado. Apenas administradores t&ecirc;m permiss&atilde;o para aceder a esta p&aacute;gina.", 403
+
+
+MOVIMENTOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD + """<title>Todos os Movimentos - STAE</title>
+<script>
+    function searchTable() {
+        var input = document.getElementById("searchInput");
+        var filter = input.value.toUpperCase();
+        var trs = document.querySelectorAll("#mainTable tr.mov-row");
+        for (var i = 0; i < trs.length; i++) {
+            var txtValue = trs[i].textContent || trs[i].innerText;
+            if (txtValue.toUpperCase().indexOf(filter) > -1) {
+                trs[i].style.display = "";
+            } else {
+                trs[i].style.display = "none";
+                var det = document.getElementById("det_" + trs[i].dataset.index);
+                if (det) det.style.display = "none";
+            }
+        }
+    }
+    function toggleDetails(id) {
+        var el = document.getElementById(id);
+        if (el.style.display === 'none' || el.classList.contains('hidden')) {
+            el.style.display = 'table-row';
+            el.classList.remove('hidden');
+        } else {
+            el.style.display = 'none';
+        }
+    }
+</script>
+</head>
+<body>
+    <div class="nav">
+        <strong>STAE GESTÃO - TODOS OS MOVIMENTOS</strong>
+        <div>
+            <a href="/" class="btn btn-outline" style="background:white; color:#0f172a; margin-right:1rem">🏠 Voltar ao Início</a>
+            <span>👤 {{session.username}}</span>
+        </div>
+    </div>
+    <div class="container">
+        <div class="card">
+            <h3 style="margin-bottom:1rem">Registo Completo de Movimentos</h3>
+            <input type="text" id="searchInput" onkeyup="searchTable()" placeholder="Pesquisar guia, equipamento, origem/destino, status..." style="width:100%; padding:0.8rem; border:1px solid #cbd5e1; border-radius:4px; margin-bottom:1rem">
+            
+            <table id="mainTable" style="width:100%; border-collapse:collapse; margin-top:1rem; font-size:0.9rem">
+                <tr style="background:#f1f5f9; text-align:left; color:#64748b; font-size:0.8rem">
+                    <th style="padding:1rem">GUIA</th>
+                    <th style="padding:1rem">EQUIPAMENTO</th>
+                    <th style="padding:1rem">S/N</th>
+                    <th style="padding:1rem">ORIGEM/DESTINO</th>
+                    <th style="padding:1rem">STATUS</th>
+                    <th style="padding:1rem">DATA</th>
+                    <th style="padding:1rem">ACÇÕES</th>
+                </tr>
+                {% for m in movimentos %}
+                <tr class="mov-row" data-index="{{loop.index}}" style="border-bottom:1px solid var(--border)">
+                    <td style="padding:1rem"><strong>{{m.guia[:8]}}</strong><br>{{m.guia[8:]}}</td>
+                    <td style="padding:1rem">{{m.equipamento}}<br><small style="color:#64748b">({{m.marca}})</small></td>
+                    <td style="padding:1rem">{{m.numero_serie}}</td>
+                    <td style="padding:1rem">{{m.origem_destino}}</td>
+                    <td style="padding:1rem">
+                        {% if m.status == 'PENDENTE_RECEPCAO' %}
+                            <span style="background:#fef3c7; color:#d97706; padding:0.2rem 0.5rem; border-radius:0.3rem; font-size:0.8rem; font-weight:bold;">Pendente Confirmação</span>
+                        {% elif m.status == 'RECEBIDO' %}
+                            <span style="background:#dcfce3; color:#166534; padding:0.2rem 0.5rem; border-radius:0.3rem; font-size:0.8rem; font-weight:bold;">Recebido</span>
+                        {% elif m.status == 'REJEITADO' %}
+                            <span style="background:#fee2e2; color:#b91c1c; padding:0.2rem 0.5rem; border-radius:0.3rem; font-size:0.8rem; font-weight:bold;">Rejeitado</span>
+                        {% else %}
+                            {{m.status}}
+                        {% endif %}
+                    </td>
+                    <td style="padding:1rem">{{m.data[:10]}}<br><small style="color:#64748b">{{m.data[11:]}}</small></td>
+                    <td style="padding:1rem; display:flex; gap:0.3rem; flex-wrap:wrap; align-items:center;">
+                        <button onclick="toggleDetails('det_{{loop.index}}')" class="btn btn-outline" style="padding:0.3rem 0.6rem; font-size:0.8rem;">Detalhes</button>
+                        <a href="/ver_guia/{{m.guia}}" target="_blank" class="btn btn-outline" style="padding:0.3rem 0.6rem; font-size:0.8rem;">PDF</a>
+                        {% if m.status == 'PENDENTE_RECEPCAO' %}
+                            {% if is_admin or m.setor_destino_id == meu_setor %}
+                                <form method="POST" action="/confirmar_recepcao/{{m.guia}}" style="display:inline;"><button class="btn btn-green" style="padding:0.3rem 0.6rem; font-size:0.8rem;">✅ Confirmar</button></form>
+                                <form method="POST" action="/rejeitar_recepcao/{{m.guia}}" style="display:inline;"><button class="btn btn-danger" style="padding:0.3rem 0.6rem; font-size:0.8rem;">❌ Rejeitar</button></form>
+                            {% endif %}
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr id="det_{{loop.index}}" class="hidden" style="background:#f8fafc; display:none;">
+                    <td colspan="7" style="padding:1rem; border-bottom:1px solid var(--border)">
+                        <div style="display:flex; gap:2rem; font-size:0.85rem; color:#475569; flex-wrap:wrap">
+                            <div><strong>Motivo:</strong> {{m.motivo or '-'}}</div>
+                            <div><strong>Técnico do Sistema:</strong> {{m.tecnico or '-'}}</div>
+                            <div><strong>Fornecedor:</strong> {{m.fornecedor or '-'}}</div>
+                            <div><strong>Quantidade:</strong> {{m.quantidade or '-'}}</div>
+                            <div><strong>Entregue Por:</strong> {{m.entregue_nome or '-'}}</div>
+                            <div><strong>Recebido Por:</strong> {{m.recebido_nome or '-'}}</div>
+                            <div><strong>Agente de Protecção:</strong> {{m.protecao_nome or '-'}}</div>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+</body></html>"""
+
+
 @app.route('/')
 def index():
+    if 'username' not in session: return redirect(url_for('login'))
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('''SELECT m.guia, m.equipamento, m.numero_serie, m.origem_destino, m.status, m.data, m.marca, 
-                        m.tecnico, m.entregue_por, m.recebido_por, m.motivo, m.agente_protecao
-                 FROM movimentos m ORDER BY m.id DESC LIMIT 100''')
-    cols = [desc[0] for desc in c.description]
-    movs = [dict(zip(cols, r)) for r in c.fetchall()]
+    msg = request.args.get('msg')
+    
+    setor_id = session.get('setor_id')
+    is_admin = session.get('perfil') == 'admin'
+    
+    if is_admin:
+        c.execute("SELECT * FROM movimentos ORDER BY id DESC LIMIT 50")
+    else:
+        c.execute("SELECT * FROM movimentos WHERE setor_origem_id=? OR setor_destino_id=? ORDER BY id DESC LIMIT 50", (setor_id, setor_id))
+    
+    cols = [d[0] for d in c.description]
+    movimentos = [dict(zip(cols, r)) for r in c.fetchall()]
     
     c.execute("SELECT id, nome FROM funcionarios")
     func_map = {str(r[0]): r[1] for r in c.fetchall()}
     
+    for m in movimentos:
+        m['entregue_nome'] = func_map.get(str(m.get('entregue_por')), m.get('entregue_por') or '-')
+        m['recebido_nome'] = func_map.get(str(m.get('recebido_por')), m.get('recebido_por') or '-')
+        m['protecao_nome'] = func_map.get(str(m.get('agente_protecao')), m.get('agente_protecao') or '-')
+        
+    # Fetch pending receptions
+    pendentes = []
+    if not is_admin and setor_id:
+        c.execute("SELECT * FROM movimentos WHERE setor_destino_id=? AND status='PENDENTE_RECEPCAO' ORDER BY id DESC", (setor_id,))
+        if c.description:
+            p_cols = [d[0] for d in c.description]
+            pendentes = [dict(zip(p_cols, r)) for r in c.fetchall()]
+    elif is_admin:
+        c.execute("SELECT * FROM movimentos WHERE status='PENDENTE_RECEPCAO' ORDER BY id DESC")
+        if c.description:
+            p_cols = [d[0] for d in c.description]
+            pendentes = [dict(zip(p_cols, r)) for r in c.fetchall()]
+            
+    if is_admin:
+        c.execute("SELECT id, equipamento, marca, numero_serie, quantidade FROM inventario_local WHERE status!='Pendente' ORDER BY equipamento")
+    else:
+        c.execute("SELECT id, equipamento, marca, numero_serie, quantidade FROM inventario_local WHERE setor_id=? AND status!='Pendente' ORDER BY equipamento", (setor_id,))
+    inv_items = []
+    if c.description:
+        inv_cols = [d[0] for d in c.description]
+        inv_items = [dict(zip(inv_cols, r)) for r in c.fetchall()]
+        
     c.execute("SELECT id, nome FROM setores")
     setores = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
-    
     c.execute("SELECT id, nome FROM marcas")
     marcas = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
-    
     c.execute("SELECT id, nome FROM tipos_equipamento")
     tipos = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM motivos")
@@ -1605,23 +2113,41 @@ def index():
     c.execute("SELECT id, nome FROM instituicoes")
     instituicoes = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     
-    for m in movs:
-        m['entregue_nome'] = func_map.get(str(m['entregue_por']), m['entregue_por'] or '-')
-        m['recebido_nome'] = func_map.get(str(m['recebido_por']), m['recebido_por'] or '-')
-        m['protecao_nome'] = func_map.get(str(m['agente_protecao']), m['agente_protecao'] or '-')
     c.execute("SELECT COUNT(*) FROM movimentos WHERE tipo='ENTRADA' AND status LIKE '%repara%'")
     row_count = c.fetchone()
-    em_rep = row_count[0] if row_count else 0
+    em_reparacao = row_count[0] if row_count else 0
     
-    # Query available inventory items
-    try:
-        c.execute("SELECT id, equipamento, marca, numero_serie, quantidade FROM inventario_local WHERE quantidade > 0 AND status='Disponível'")
-        inv_items = [{'id': r[0], 'equipamento': r[1], 'marca': r[2], 'numero_serie': r[3], 'quantidade': r[4]} for r in c.fetchall()]
-    except Exception as e:
-        inv_items = []
+    conn.close()
+    return render_template_string(MAIN_TEMPLATE, msg=msg, username=session['username'], perfil=session.get('perfil'), movimentos=movimentos, pendentes=pendentes, inv_items=inv_items, setores=setores, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, em_reparacao=em_reparacao)
+
+
+@app.route('/movimentos')
+def movimentos():
+    if 'username' not in session: return redirect(url_for('login'))
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    setor_id = session.get('setor_id')
+    is_admin = session.get('perfil') == 'admin'
+    
+    if is_admin:
+        c.execute("SELECT * FROM movimentos ORDER BY id DESC")
+    else:
+        c.execute("SELECT * FROM movimentos WHERE setor_origem_id=? OR setor_destino_id=? ORDER BY id DESC", (setor_id, setor_id))
+        
+    cols = [d[0] for d in c.description]
+    movs = [dict(zip(cols, r)) for r in c.fetchall()]
+    
+    c.execute("SELECT id, nome FROM funcionarios")
+    func_map = {str(r[0]): r[1] for r in c.fetchall()}
+    
+    for m in movs:
+        m['entregue_nome'] = func_map.get(str(m.get('entregue_por')), m.get('entregue_por') or '-')
+        m['recebido_nome'] = func_map.get(str(m.get('recebido_por')), m.get('recebido_por') or '-')
+        m['protecao_nome'] = func_map.get(str(m.get('agente_protecao')), m.get('agente_protecao') or '-')
         
     conn.close()
-    return render_template_string(MAIN_TEMPLATE, username=session['username'], perfil=session.get('perfil'), movimentos=movs, em_reparacao=em_rep, setores=setores, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, inv_items=inv_items)
+    return render_template_string(MOVIMENTOS_TEMPLATE, movimentos=movs, meu_setor=setor_id, is_admin=is_admin)
 
 @app.route('/api/funcionarios')
 def api_funcionarios():
@@ -1690,19 +2216,33 @@ def registrar_entrada():
     c = conn.cursor()
     guia = f"ENT-{datetime.now().year}-{len(c.execute('SELECT id FROM movimentos').fetchall())+1:04d}"
     
-    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade) 
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia, "ENTRADA", request.form['equipamento'], request.form['origem'], request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), "Em estoque", None, request.form['numero_serie'], request.form.get('marca',''), request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), request.form.get('quantidade', '1')))
+    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
+              (guia, "ENTRADA", request.form['equipamento'], request.form['origem'], request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), "Em estoque", None, request.form['numero_serie'], request.form.get('marca',''), request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), request.form.get('quantidade', '1'), None, session.get('setor_id')))
     conn.commit()
     conn.close()
     return redirect(url_for('index'))
 
 @app.route('/registrar_saida', methods=['POST'])
 def registrar_saida():
+    if 'username' not in session: return redirect(url_for('login'))
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # Stock deduction if linked to inventory
+    destino_raw = request.form['destino']
+    setor_destino_id = None
+    origem_destino = destino_raw
+    if destino_raw.startswith("SETOR_"):
+        setor_destino_id = int(destino_raw.split("_")[1])
+        c.execute("SELECT nome FROM setores WHERE id=?", (setor_destino_id,))
+        row = c.fetchone()
+        origem_destino = "Interno - " + row[0] if row else destino_raw
+    elif destino_raw.startswith("EXTERNO_"):
+        origem_destino = "Externo - " + destino_raw.split("_", 1)[1]
+        
+    setor_origem_id = session.get('setor_id')
+    qty_to_remove = int(request.form.get('quantidade', 1))
+    
     inv_id = request.form.get('inventario_id')
     if inv_id:
         try:
@@ -1710,20 +2250,25 @@ def registrar_saida():
             row = c.fetchone()
             if row:
                 current_qty = int(row[0])
-                qty_to_remove = int(request.form.get('quantidade', 1))
-                new_qty = max(0, current_qty - qty_to_remove)
-                new_status = 'Disponível' if new_qty > 0 else 'Indisponível'
+                if current_qty < qty_to_remove:
+                    flash("Erro: Quantidade excede o disponvel em stock!")
+                    conn.close()
+                    return redirect(url_for('index'))
+                new_qty = current_qty - qty_to_remove
+                new_status = 'Disponvel' if new_qty > 0 else 'Indisponvel'
                 c.execute("UPDATE inventario_local SET quantidade=?, status=? WHERE id=?", (new_qty, new_status, inv_id))
         except Exception as e:
-            print(f"Erro ao atualizar inventário: {e}")
+            print(f"Erro ao atualizar inventrio: {e}")
             
     guia = f"SAI-{datetime.now().year}-{len(c.execute('SELECT id FROM movimentos').fetchall())+1:04d}"
+    status_movimento = "PENDENTE_RECEPCAO" if setor_destino_id else "Entregue"
     
-    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade) 
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia, "SAIDA", request.form['equipamento'], request.form['destino'], request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), "Entregue", None, request.form['numero_serie'], request.form.get('marca',''), request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), request.form.get('quantidade', '1')))
+    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
+              (guia, "SAIDA", request.form['equipamento'], origem_destino, request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), status_movimento, None, request.form['numero_serie'], request.form.get('marca',''), request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), str(qty_to_remove), setor_origem_id, setor_destino_id))
     conn.commit()
     conn.close()
+    flash("Sada registada com sucesso!")
     return redirect(url_for('index'))
 
 @app.route('/registrar_saida_reparacao/<original_guia>', methods=['POST'])
@@ -1770,8 +2315,8 @@ def cadastros():
     setores = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome, cargo, setor_id FROM funcionarios")
     funcs = [{'id':r[0], 'nome':r[1], 'cargo':r[2], 'setor_id':r[3]} for r in c.fetchall()]
-    c.execute("SELECT id, username, perfil, nome_completo FROM users")
-    users_data = [{'id':r[0], 'username':r[1], 'perfil':r[2], 'nome_completo':r[3] or r[1]} for r in c.fetchall()]
+    c.execute("SELECT id, username, perfil, nome_completo, setor_id FROM users")
+    users_data = [{'id':r[0], 'username':r[1], 'perfil':r[2], 'nome_completo':r[3] or r[1], 'setor_id':r[4]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM marcas")
     marcas = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM tipos_equipamento")
@@ -1892,7 +2437,9 @@ def add_user():
     c = conn.cursor()
     pwd = hashlib.md5(request.form['password'].encode()).hexdigest()
     try:
-        c.execute("INSERT INTO users (username, password, perfil, nome_completo) VALUES (?,?,?,?)", (request.form['username'], pwd, request.form['perfil'], request.form.get('nome_completo')))
+        setor_val = request.form.get('setor_id')
+        setor_val = int(setor_val) if (setor_val and setor_val != '' and setor_val != 'None') else None
+        c.execute("INSERT INTO users (username, password, perfil, nome_completo, setor_id) VALUES (?,?,?,?,?)", (request.form['username'], pwd, request.form['perfil'], request.form.get('nome_completo'), setor_val))
         conn.commit()
         msg = "Usuário adicionado com sucesso!"
     except:
@@ -1926,11 +2473,13 @@ def edit_user(id):
     username = request.form.get('username')
     perfil = request.form.get('perfil')
     pwd = request.form.get('password')
+    setor_id = request.form.get('setor_id')
+    setor_val = int(setor_id) if (setor_id and setor_id != '' and setor_id != 'None') else None
     if pwd:
         hashed = hashlib.md5(pwd.encode()).hexdigest()
-        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, password=? WHERE id=?", (nome_completo, username, perfil, hashed, id))
+        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, password=?, setor_id=? WHERE id=?", (nome_completo, username, perfil, hashed, setor_val, id))
     else:
-        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=? WHERE id=?", (nome_completo, username, perfil, id))
+        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, setor_id=? WHERE id=?", (nome_completo, username, perfil, setor_val, id))
     conn.commit()
     conn.close()
     return redirect(url_for('cadastros', msg="Utilizador atualizado!"))
@@ -2367,73 +2916,380 @@ import json
 @app.route('/relatorios')
 def relatorios():
     if 'username' not in session: return redirect(url_for('login'))
+    if session.get('perfil') != 'admin':
+        return redirect(url_for('index', msg="Erro: Apenas administradores têm acesso aos relatórios."))
+        
+    tab = request.args.get('tab', 'inventario')
+    setor_id = request.args.get('setor_id', '')
+    status = request.args.get('status', '')
+    marca = request.args.get('marca', '')
+    tipo_equipamento = request.args.get('tipo_equipamento', '')
+    data_inicio = request.args.get('data_inicio', '')
+    data_fim = request.args.get('data_fim', '')
+    mov_tipo = request.args.get('mov_tipo', '')
+    
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # Entradas e Saidas por Equipamento
-    c.execute("""SELECT equipamento, 
-                 SUM(CASE WHEN tipo='ENTRADA' THEN 1 ELSE 0 END) as entradas,
-                 SUM(CASE WHEN tipo='SAIDA' THEN 1 ELSE 0 END) as saidas
-                 FROM movimentos GROUP BY equipamento""")
-    stat_equip = [{'equipamento':r[0] or 'Desconhecido', 'entradas':r[1], 'saidas':r[2]} for r in c.fetchall()]
+    # Load filter lists
+    c.execute("SELECT id, nome FROM setores")
+    setores = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
+    c.execute("SELECT id, nome FROM marcas")
+    marcas = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
+    c.execute("SELECT id, nome FROM tipos_equipamento")
+    tipos_eq = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     
-    # Entradas por Setor
-    c.execute("""SELECT origem_destino, COUNT(*) as total FROM movimentos WHERE tipo='ENTRADA' GROUP BY origem_destino""")
-    stat_setor = [{'origem':r[0] or 'Desconhecido', 'total':r[1]} for r in c.fetchall()]
+    items = []
     
-    # Entradas e Saidas por Marca
-    c.execute("""SELECT marca, 
-                 SUM(CASE WHEN tipo='ENTRADA' THEN 1 ELSE 0 END) as entradas,
-                 SUM(CASE WHEN tipo='SAIDA' THEN 1 ELSE 0 END) as saidas
-                 FROM movimentos GROUP BY marca""")
-    stat_marca = [{'marca':r[0] or 'Desconhecido', 'entradas':r[1], 'saidas':r[2]} for r in c.fetchall()]
-    
-    conn.close()
-    return render_template_string(RELATORIOS_TEMPLATE, 
-                                  stat_equip=json.dumps(stat_equip), 
-                                  stat_setor=json.dumps(stat_setor),
-                                  stat_marca=json.dumps(stat_marca))
-
-@app.route('/relatorio_pdf')
-def relatorio_pdf():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT guia, tipo, equipamento, origem_destino, data FROM movimentos ORDER BY id DESC LIMIT 50')
-    rows = c.fetchall()
-    conn.close()
-    
-    buffer = io.BytesIO()
-    c_pdf = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-    c_pdf.setFont("Helvetica-Bold", 14)
-    c_pdf.drawCentredString(width/2, height - 50, "Relatório Geral de Movimentações - STAE")
-    
-    c_pdf.setFont("Helvetica-Bold", 10)
-    y = height - 100
-    c_pdf.drawString(50, y, "Guia")
-    c_pdf.drawString(150, y, "Entrada/Saída")
-    c_pdf.drawString(250, y, "Equipamento")
-    c_pdf.drawString(350, y, "Origem/Destino")
-    c_pdf.drawString(480, y, "Data")
-    c_pdf.line(50, y-5, width-50, y-5)
-    
-    c_pdf.setFont("Helvetica", 9)
-    y -= 20
-    for r in rows:
-        c_pdf.drawString(50, y, str(r[0]))
-        c_pdf.drawString(150, y, str(r[1]))
-        c_pdf.drawString(250, y, str(r[2]))
-        c_pdf.drawString(350, y, str(r[3])[:20])
-        c_pdf.drawString(480, y, str(r[4])[:10])
-        y -= 15
-        if y < 50:
-            c_pdf.showPage()
-            y = height - 50
-            c_pdf.setFont("Helvetica", 9)
+    if tab == 'inventario':
+        query = '''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
+                          i.data_registo, i.observacoes, s.nome as setor_nome 
+                   FROM inventario_local i 
+                   LEFT JOIN setores s ON i.setor_id = s.id 
+                   WHERE i.status != 'Pendente' '''
+        params = []
+        if setor_id:
+            query += " AND i.setor_id = ?"
+            params.append(int(setor_id))
+        if status:
+            query += " AND i.status = ?"
+            params.append(status)
+        if marca:
+            query += " AND i.marca = ?"
+            params.append(marca)
+        if tipo_equipamento:
+            query += " AND i.equipamento = ?"
+            params.append(tipo_equipamento)
             
-    c_pdf.save()
-    buffer.seek(0)
-    return send_file(buffer, as_attachment=False, download_name="Relatorio_STAE.pdf", mimetype='application/pdf')
+        query += " ORDER BY i.id DESC"
+        c.execute(query, params)
+        cols = [d[0] for d in c.description]
+        items = [dict(zip(cols, r)) for r in c.fetchall()]
+        
+    elif tab == 'entradas_saidas':
+        query = '''SELECT m.guia, m.tipo, m.equipamento, m.marca, m.numero_serie, m.origem_destino, 
+                          m.quantidade, m.data, m.status, m.tecnico, m.motivo 
+                   FROM movimentos m 
+                   WHERE m.tipo IN ('ENTRADA', 'SAIDA') '''
+        params = []
+        if setor_id:
+            query += " AND (m.setor_origem_id = ? OR m.setor_destino_id = ?)"
+            params.extend([int(setor_id), int(setor_id)])
+        if marca:
+            query += " AND m.marca = ?"
+            params.append(marca)
+        if tipo_equipamento:
+            query += " AND m.equipamento = ?"
+            params.append(tipo_equipamento)
+        if data_inicio:
+            query += " AND m.data >= ?"
+            params.append(data_inicio)
+        if data_fim:
+            query += " AND m.data <= ?"
+            params.append(data_fim)
+            
+        query += " ORDER BY m.id DESC"
+        c.execute(query, params)
+        cols = [d[0] for d in c.description]
+        items = [dict(zip(cols, r)) for r in c.fetchall()]
+        
+    elif tab == 'movimentos':
+        query = '''SELECT m.guia, m.tipo, m.equipamento, m.marca, m.numero_serie, m.origem_destino, 
+                          m.quantidade, m.data, m.status, m.tecnico, m.motivo 
+                   FROM movimentos m 
+                   WHERE 1=1 '''
+        params = []
+        if mov_tipo:
+            query += " AND m.tipo = ?"
+            params.append(mov_tipo)
+        if status:
+            query += " AND m.status = ?"
+            params.append(status)
+        if setor_id:
+            query += " AND (m.setor_origem_id = ? OR m.setor_destino_id = ?)"
+            params.extend([int(setor_id), int(setor_id)])
+        if data_inicio:
+            query += " AND m.data >= ?"
+            params.append(data_inicio)
+        if data_fim:
+            query += " AND m.data <= ?"
+            params.append(data_fim)
+            
+        query += " ORDER BY m.id DESC"
+        c.execute(query, params)
+        cols = [d[0] for d in c.description]
+        items = [dict(zip(cols, r)) for r in c.fetchall()]
+        
+    conn.close()
+    return render_template_string(
+        RELATORIOS_TEMPLATE,
+        tab=tab,
+        items=items,
+        setores=setores,
+        marcas=marcas,
+        tipos_eq=tipos_eq,
+        selected_setor=setor_id,
+        selected_status=status,
+        selected_marca=marca,
+        selected_tipo_eq=tipo_equipamento,
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+        mov_tipo=mov_tipo
+    )
+
+@app.route('/relatorios/export/<format_type>')
+def relatorios_export(format_type):
+    if 'username' not in session or session.get('perfil') != 'admin':
+        return abort(403)
+        
+    tab = request.args.get('tab', 'inventario')
+    setor_id = request.args.get('setor_id', '')
+    status = request.args.get('status', '')
+    marca = request.args.get('marca', '')
+    tipo_equipamento = request.args.get('tipo_equipamento', '')
+    data_inicio = request.args.get('data_inicio', '')
+    data_fim = request.args.get('data_fim', '')
+    mov_tipo = request.args.get('mov_tipo', '')
+    
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    headers = []
+    rows = []
+    title = ""
+    
+    if tab == 'inventario':
+        title = "Relatório de Inventário"
+        headers = ["ID", "Equipamento", "Marca", "Nº Série", "Qtd", "Estado", "Data Registo", "Observações", "Setor"]
+        query = '''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
+                          i.data_registo, i.observacoes, s.nome as setor_nome 
+                   FROM inventario_local i 
+                   LEFT JOIN setores s ON i.setor_id = s.id 
+                   WHERE i.status != 'Pendente' '''
+        params = []
+        if setor_id:
+            query += " AND i.setor_id = ?"
+            params.append(int(setor_id))
+        if status:
+            query += " AND i.status = ?"
+            params.append(status)
+        if marca:
+            query += " AND i.marca = ?"
+            params.append(marca)
+        if tipo_equipamento:
+            query += " AND i.equipamento = ?"
+            params.append(tipo_equipamento)
+        query += " ORDER BY i.id DESC"
+        c.execute(query, params)
+        rows = c.fetchall()
+        
+    elif tab == 'entradas_saidas':
+        title = "Relatório de Entradas e Saídas"
+        headers = ["Guia", "Tipo", "Equipamento", "Marca", "Nº Série", "Origem/Destino", "Qtd", "Data", "Estado", "Técnico", "Motivo"]
+        query = '''SELECT m.guia, m.tipo, m.equipamento, m.marca, m.numero_serie, m.origem_destino, 
+                          m.quantidade, m.data, m.status, m.tecnico, m.motivo 
+                   FROM movimentos m 
+                   WHERE m.tipo IN ('ENTRADA', 'SAIDA') '''
+        params = []
+        if setor_id:
+            query += " AND (m.setor_origem_id = ? OR m.setor_destino_id = ?)"
+            params.extend([int(setor_id), int(setor_id)])
+        if marca:
+            query += " AND m.marca = ?"
+            params.append(marca)
+        if tipo_equipamento:
+            query += " AND m.equipamento = ?"
+            params.append(tipo_equipamento)
+        if data_inicio:
+            query += " AND m.data >= ?"
+            params.append(data_inicio)
+        if data_fim:
+            query += " AND m.data <= ?"
+            params.append(data_fim)
+        query += " ORDER BY m.id DESC"
+        c.execute(query, params)
+        rows = c.fetchall()
+        
+    elif tab == 'movimentos':
+        title = "Relatório de Movimentações"
+        headers = ["Guia", "Tipo", "Equipamento", "Marca", "Nº Série", "Origem/Destino", "Qtd", "Data", "Estado", "Técnico", "Motivo"]
+        query = '''SELECT m.guia, m.tipo, m.equipamento, m.marca, m.numero_serie, m.origem_destino, 
+                          m.quantidade, m.data, m.status, m.tecnico, m.motivo 
+                   FROM movimentos m 
+                   WHERE 1=1 '''
+        params = []
+        if mov_tipo:
+            query += " AND m.tipo = ?"
+            params.append(mov_tipo)
+        if status:
+            query += " AND m.status = ?"
+            params.append(status)
+        if setor_id:
+            query += " AND (m.setor_origem_id = ? OR m.setor_destino_id = ?)"
+            params.extend([int(setor_id), int(setor_id)])
+        if data_inicio:
+            query += " AND m.data >= ?"
+            params.append(data_inicio)
+        if data_fim:
+            query += " AND m.data <= ?"
+            params.append(data_fim)
+        query += " ORDER BY m.id DESC"
+        c.execute(query, params)
+        rows = c.fetchall()
+        
+    conn.close()
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    if format_type == 'excel':
+        # Generate UTF-8 BOM CSV for Excel
+        output = io.StringIO()
+        output.write('ï»¿') # BOM
+        import csv
+        writer = csv.writer(output, delimiter=';')
+        writer.writerow(headers)
+        for r in rows:
+            # Format row fields as strings
+            writer.writerow([str(val) if val is not None else '' for val in r])
+            
+        mem = io.BytesIO()
+        mem.write(output.getvalue().encode('utf-8'))
+        mem.seek(0)
+        return send_file(
+            mem,
+            as_attachment=True,
+            download_name=f"relatorio_{tab}_{timestamp}.csv",
+            mimetype='text/csv'
+        )
+        
+    elif format_type == 'pdf':
+        # Professional PDF styling using reportlab SimpleDocTemplate in Landscape
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        
+        buffer = io.BytesIO()
+        # Use landscape A4 to ensure all data columns fit neatly
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+        story = []
+        
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'ReportTitle',
+            parent=styles['Heading1'],
+            fontName='Helvetica-Bold',
+            fontSize=18,
+            textColor=colors.HexColor('#1e293b'),
+            spaceAfter=15
+        )
+        sub_style = ParagraphStyle(
+            'ReportSub',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=9,
+            textColor=colors.HexColor('#64748b'),
+            spaceAfter=25
+        )
+        cell_style = ParagraphStyle(
+            'CellText',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=8,
+            leading=10
+        )
+        header_style = ParagraphStyle(
+            'HeaderText',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=8,
+            leading=10,
+            textColor=colors.white
+        )
+        
+        # Title Banner
+        story.append(Paragraph(title, title_style))
+        story.append(Paragraph(f"Gerado em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Utilizador: {session['username']}", sub_style))
+        
+        # Prepare table data
+        table_data = []
+        table_data.append([Paragraph(h, header_style) for h in headers])
+        for r in rows:
+            table_data.append([Paragraph(str(val) if val is not None else '', cell_style) for val in r])
+            
+        # Determine column widths automatically (page width is 842 - 60 = 782)
+        col_count = len(headers)
+        col_width = 782 / col_count
+        
+        t = Table(table_data, colWidths=[col_width]*col_count)
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#3b82f6')),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f8fafc')]),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(t)
+        
+        doc.build(story)
+        buffer.seek(0)
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name=f"relatorio_{tab}_{timestamp}.pdf",
+            mimetype='application/pdf'
+        )
+
+@app.route('/confirmar_recepcao/<guia>', methods=['POST'])
+def confirmar_recepcao(guia):
+    if 'username' not in session: return redirect(url_for('login'))
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT equipamento, marca, numero_serie, quantidade, setor_destino_id FROM movimentos WHERE guia=? AND status='PENDENTE_RECEPCAO'", (guia,))
+    mov = c.fetchone()
+    if mov:
+        equipamento, marca, numero_serie, quantidade, setor_destino_id = mov
+        # Check if already exists in dest
+        c.execute("SELECT id, quantidade FROM inventario_local WHERE setor_id=? AND equipamento=? AND numero_serie=? AND marca=?", (setor_destino_id, equipamento, numero_serie, marca))
+        inv = c.fetchone()
+        qty = int(quantidade) if quantidade and str(quantidade).isdigit() else 1
+        if inv:
+            c.execute("UPDATE inventario_local SET quantidade=quantidade+?, status='Disponvel' WHERE id=?", (qty, inv[0]))
+        else:
+            c.execute("INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, setor_id) VALUES (?,?,?,?,'Disponvel',?,?)",
+                      (equipamento, marca, numero_serie, qty, datetime.now().strftime("%Y-%m-%d"), setor_destino_id))
+        
+        c.execute("UPDATE movimentos SET status='RECEBIDO' WHERE guia=?", (guia,))
+        conn.commit()
+        flash(f"Receo confirmada para a guia {guia}!")
+    conn.close()
+    return redirect(url_for('index'))
+
+@app.route('/rejeitar_recepcao/<guia>', methods=['POST'])
+def rejeitar_recepcao(guia):
+    if 'username' not in session: return redirect(url_for('login'))
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT equipamento, marca, numero_serie, quantidade, setor_origem_id FROM movimentos WHERE guia=? AND status='PENDENTE_RECEPCAO'", (guia,))
+    mov = c.fetchone()
+    if mov:
+        equipamento, marca, numero_serie, quantidade, setor_origem_id = mov
+        if setor_origem_id:
+            c.execute("SELECT id, quantidade FROM inventario_local WHERE setor_id=? AND equipamento=? AND numero_serie=? AND marca=?", (setor_origem_id, equipamento, numero_serie, marca))
+            inv = c.fetchone()
+            qty = int(quantidade) if quantidade and str(quantidade).isdigit() else 1
+            if inv:
+                c.execute("UPDATE inventario_local SET quantidade=quantidade+?, status='Disponvel' WHERE id=?", (qty, inv[0]))
+            else:
+                c.execute("INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, setor_id) VALUES (?,?,?,?,'Disponvel',?,?)",
+                          (equipamento, marca, numero_serie, qty, datetime.now().strftime("%Y-%m-%d"), setor_origem_id))
+        c.execute("UPDATE movimentos SET status='REJEITADO' WHERE guia=?", (guia,))
+        conn.commit()
+        flash(f"Transferncia da guia {guia} foi rejeitada e o material devolvido ao inventrio de origem.")
+    conn.close()
+    return redirect(url_for('index'))
 
 @app.route('/inventario')
 def inventario():
@@ -2441,22 +3297,73 @@ def inventario():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    c.execute("SELECT id, equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes FROM inventario_local ORDER BY id DESC")
+    setor_id = session.get('setor_id')
+    is_admin = session.get('perfil') == 'admin'
+    
+    # Base query for inventory (excluding Pending which is shown in a separate panel)
+    if is_admin:
+        c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
+                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome 
+                     FROM inventario_local i 
+                     LEFT JOIN setores s ON i.setor_id = s.id 
+                     WHERE i.status != 'Pendente'
+                     ORDER BY i.id DESC''')
+    else:
+        c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
+                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome 
+                     FROM inventario_local i 
+                     LEFT JOIN setores s ON i.setor_id = s.id 
+                     WHERE i.setor_id = ? AND i.status != 'Pendente'
+                     ORDER BY i.id DESC''', (setor_id,))
+                     
     cols = [d[0] for d in c.description]
     items = [dict(zip(cols, r)) for r in c.fetchall()]
     
-    c.execute("SELECT COUNT(*), SUM(quantidade) FROM inventario_local")
-    res = c.fetchone()
-    total_qty = res[1] if res else 0
+    # Load pending confirmation list for this sector (only for technicians) or all (admin)
+    if is_admin:
+        c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
+                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome, '' as guia_origem
+                     FROM inventario_local i 
+                     LEFT JOIN setores s ON i.setor_id = s.id 
+                     WHERE i.status = 'Pendente'
+                     ORDER BY i.id DESC''')
+    else:
+        c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
+                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome, '' as guia_origem
+                     FROM inventario_local i 
+                     LEFT JOIN setores s ON i.setor_id = s.id 
+                     WHERE i.setor_id = ? AND i.status = 'Pendente'
+                     ORDER BY i.id DESC''', (setor_id,))
+    cols_p = [d[0] for d in c.description]
+    pending_items = [dict(zip(cols_p, r)) for r in c.fetchall()]
     
-    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Disponível'")
-    disponiveis = c.fetchone()[0] or 0
-    
-    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Em uso'")
-    em_uso = c.fetchone()[0] or 0
-    
-    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status IN ('Danificado', 'Avariado')")
-    danificados = c.fetchone()[0] or 0
+    # Calculate stats selectively based on user scope
+    if is_admin:
+        c.execute("SELECT COUNT(*), SUM(quantidade) FROM inventario_local WHERE status != 'Pendente'")
+        res = c.fetchone()
+        total_qty = res[1] if res else 0
+        
+        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Disponível'")
+        disponiveis = c.fetchone()[0] or 0
+        
+        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Em uso'")
+        em_uso = c.fetchone()[0] or 0
+        
+        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status IN ('Danificado', 'Avariado')")
+        danificados = c.fetchone()[0] or 0
+    else:
+        c.execute("SELECT COUNT(*), SUM(quantidade) FROM inventario_local WHERE setor_id=? AND status != 'Pendente'", (setor_id,))
+        res = c.fetchone()
+        total_qty = res[1] if res else 0
+        
+        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE setor_id=? AND status='Disponível'", (setor_id,))
+        disponiveis = c.fetchone()[0] or 0
+        
+        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE setor_id=? AND status='Em uso'", (setor_id,))
+        em_uso = c.fetchone()[0] or 0
+        
+        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE setor_id=? AND status IN ('Danificado', 'Avariado')", (setor_id,))
+        danificados = c.fetchone()[0] or 0
     
     stats = {
         'total': total_qty or 0,
@@ -2479,15 +3386,17 @@ def inventario():
     instituicoes = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     
     conn.close()
-    return render_template_string(INVENTARIO_TEMPLATE, items=items, stats=stats, setores=setores, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, msg=request.args.get('msg'))
+    return render_template_string(INVENTARIO_TEMPLATE, items=items, pending_items=pending_items, stats=stats, setores=setores, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, msg=request.args.get('msg'))
 
 @app.route('/inventario/add', methods=['POST'])
 def inventario_add():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('''INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes) 
-                 VALUES (?,?,?,?,?,?,?)''', 
-              (request.form.get('equipamento'), request.form.get('marca'), request.form.get('numero_serie'), int(request.form.get('quantidade', 1)), request.form.get('status'), datetime.now().strftime("%Y-%m-%d"), request.form.get('observacoes', '')))
+    setor_id = request.form.get('setor_id')
+    setor_val = int(setor_id) if (setor_id and setor_id != '' and setor_id != 'None') else None
+    c.execute('''INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, setor_id) 
+                 VALUES (?,?,?,?,?,?,?,?)''', 
+              (request.form.get('equipamento'), request.form.get('marca'), request.form.get('numero_serie'), int(request.form.get('quantidade', 1)), request.form.get('status'), datetime.now().strftime("%Y-%m-%d"), request.form.get('observacoes', ''), setor_val))
     conn.commit()
     conn.close()
     return redirect(url_for('inventario', msg="Item adicionado ao inventário local!"))
@@ -2496,10 +3405,12 @@ def inventario_add():
 def inventario_edit(item_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+    setor_id = request.form.get('setor_id')
+    setor_val = int(setor_id) if (setor_id and setor_id != '' and setor_id != 'None') else None
     c.execute('''UPDATE inventario_local SET 
-                 equipamento=?, marca=?, numero_serie=?, quantidade=?, status=?, observacoes=? 
+                 equipamento=?, marca=?, numero_serie=?, quantidade=?, status=?, observacoes=?, setor_id=? 
                  WHERE id=?''', 
-              (request.form.get('equipamento'), request.form.get('marca'), request.form.get('numero_serie'), int(request.form.get('quantidade', 1)), request.form.get('status'), request.form.get('observacoes', ''), item_id))
+              (request.form.get('equipamento'), request.form.get('marca'), request.form.get('numero_serie'), int(request.form.get('quantidade', 1)), request.form.get('status'), request.form.get('observacoes', ''), setor_val, item_id))
     conn.commit()
     conn.close()
     return redirect(url_for('inventario', msg="Item do inventário atualizado!"))
@@ -2512,6 +3423,159 @@ def inventario_delete(item_id):
     conn.commit()
     conn.close()
     return redirect(url_for('inventario', msg="Item removido do inventário!"))
+
+@app.route('/inventario/delete_multiple', methods=['POST'])
+def inventario_delete_multiple():
+    if 'username' not in session: return jsonify({'success': False, 'error': 'Não logado'}), 401
+    data = request.get_json() or {}
+    ids = data.get('ids', [])
+    if not ids:
+        return jsonify({'success': False, 'error': 'Nenhum ID fornecido'}), 400
+    
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    placeholders = ','.join('?' for _ in ids)
+    c.execute(f"DELETE FROM inventario_local WHERE id IN ({placeholders})", ids)
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/inventario/delete_all', methods=['POST'])
+def inventario_delete_all():
+    if 'username' not in session: return redirect(url_for('login'))
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM inventario_local")
+    conn.commit()
+    conn.close()
+    return redirect(url_for('inventario', msg="Todo o inventário local foi removido com sucesso!"))
+
+@app.route('/inventario/movimentar_multiplos', methods=['POST'])
+def inventario_movimentar_multiplos():
+    if 'username' not in session: return jsonify({'success': False, 'error': 'Não logado'}), 401
+    data = request.get_json() or {}
+    ids = data.get('ids', [])
+    quantities = data.get('quantities', {})
+    setor_destino_id = data.get('setor_destino_id')
+    entregue_por = data.get('entregue_por', '')
+    recebido_por = data.get('recebido_por', '')
+    motivo = data.get('motivo', '')
+    
+    if not ids or not setor_destino_id:
+        return jsonify({'success': False, 'error': 'Parâmetros incompletos.'}), 400
+        
+    setor_destino_id = int(setor_destino_id)
+    
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    # Get target sector name
+    c.execute("SELECT nome FROM setores WHERE id=?", (setor_destino_id,))
+    res_dest = c.fetchone()
+    dest_name = res_dest[0] if res_dest else f"Setor #{setor_destino_id}"
+    
+    try:
+        # Step 1: Validate quantities first to abort early if there is any error
+        for item_id in ids:
+            qty_req = int(quantities.get(str(item_id)) or quantities.get(item_id) or 1)
+            c.execute("SELECT equipamento, quantidade FROM inventario_local WHERE id=?", (item_id,))
+            item = c.fetchone()
+            if not item:
+                return jsonify({'success': False, 'error': f'Item ID {item_id} não encontrado no inventário.'}), 400
+            if item[1] < qty_req:
+                return jsonify({'success': False, 'error': f'Quantidade solicitada para {item[0]} ({qty_req}) excede o stock disponível ({item[1]}).'}), 400
+        
+        # Step 2: Perform the movements
+        for item_id in ids:
+            qty_req = int(quantities.get(str(item_id)) or quantities.get(item_id) or 1)
+            c.execute("SELECT equipamento, marca, numero_serie, quantidade, status, observacoes, setor_id FROM inventario_local WHERE id=?", (item_id,))
+            eq_info = c.fetchone()
+            equipamento, marca, numero_serie, qty_avail, status, observacoes, setor_origem_id = eq_info
+            
+            # Subtract stock
+            new_qty = qty_avail - qty_req
+            if new_qty == 0:
+                c.execute("DELETE FROM inventario_local WHERE id=?", (item_id,))
+            else:
+                c.execute("UPDATE inventario_local SET quantidade=? WHERE id=?", (new_qty, item_id))
+            
+            # Generate unique guide prefix
+            guia_code = generate_guia('TRANSF', c)
+            
+            # Insert or update pending item in target sector
+            c.execute('''SELECT id, quantidade FROM inventario_local 
+                         WHERE equipamento=? AND marca=? AND numero_serie=? AND status='Pendente' AND setor_id=? AND guia_origem=?''',
+                      (equipamento, marca, numero_serie, setor_destino_id, guia_code))
+            exists_pending = c.fetchone()
+            if exists_pending:
+                c.execute("UPDATE inventario_local SET quantidade=quantidade+? WHERE id=?", (qty_req, exists_pending[0]))
+            else:
+                c.execute('''INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, setor_id, guia_origem) 
+                             VALUES (?,?,?,?,?,?,?,?,?)''',
+                          (equipamento, marca, numero_serie, qty_req, 'Pendente', datetime.now().strftime("%Y-%m-%d"), observacoes, setor_destino_id, guia_code))
+            
+            # Get origin sector name
+            orig_name = "-"
+            if setor_origem_id:
+                c.execute("SELECT nome FROM setores WHERE id=?", (setor_origem_id,))
+                res_orig = c.fetchone()
+                orig_name = res_orig[0] if res_orig else f"Setor #{setor_origem_id}"
+                
+            # Log movement
+            origem_destino_str = f"De {orig_name} para {dest_name}"
+            c.execute('''INSERT INTO movimentos 
+                (guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, funcionario_id, numero_serie, marca, entregue_por, recebido_por, quantidade, setor_origem_id, setor_destino_id) 
+                VALUES (?, 'TRANSFERENCIA', ?, ?, ?, ?, 'Pendente', ?, NULL, ?, ?, ?, ?, ?, ?, ?)''',
+                (guia_code, equipamento, origem_destino_str, motivo, datetime.now().strftime("%Y-%m-%d"), session['username'], numero_serie, marca, entregue_por, recebido_por, str(qty_req), setor_origem_id, setor_destino_id))
+                
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify({'success': False, 'error': f'Erro interno: {e}'}), 500
+        
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/inventario/confirmar_rececao/<int:item_id>', methods=['POST'])
+def inventario_confirmar_rececao(item_id):
+    if 'username' not in session: return redirect(url_for('login'))
+    
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    c.execute("SELECT equipamento, marca, numero_serie, quantidade, status, observacoes, setor_id, guia_origem FROM inventario_local WHERE id=? AND status='Pendente'", (item_id,))
+    item = c.fetchone()
+    if not item:
+        conn.close()
+        return redirect(url_for('inventario', msg="Erro: Item pendente não encontrado."))
+        
+    equipamento, marca, numero_serie, quantidade, status, observacoes, setor_id, guia_origem = item
+    
+    try:
+        # Check if identical available item exists in sector
+        c.execute('''SELECT id FROM inventario_local 
+                     WHERE equipamento=? AND marca=? AND numero_serie=? AND status='Disponível' AND setor_id=?''',
+                  (equipamento, marca, numero_serie, setor_id))
+        exists_avail = c.fetchone()
+        if exists_avail:
+            c.execute("UPDATE inventario_local SET quantidade=quantidade+? WHERE id=?", (quantidade, exists_avail[0]))
+            c.execute("DELETE FROM inventario_local WHERE id=?", (item_id,))
+        else:
+            c.execute("UPDATE inventario_local SET status='Disponível', guia_origem=NULL WHERE id=?", (item_id,))
+            
+        # Update movement status
+        if guia_origem:
+            c.execute("UPDATE movimentos SET status='Entregue' WHERE guia=?", (guia_origem,))
+            
+        conn.commit()
+        msg = "Equipamento recebido e adicionado ao inventário disponível!"
+    except Exception as e:
+        conn.rollback()
+        msg = f"Erro ao confirmar receção: {e}"
+        
+    conn.close()
+    return redirect(url_for('inventario', msg=msg))
 
 @app.route('/api/inventario_info/<int:item_id>')
 def api_inventario_info(item_id):
@@ -2580,7 +3644,7 @@ PG_URL = os.environ.get('DATABASE_URL') or os.environ.get('PG_URL') or "postgres
 
 def get_pg_connection():
     try:
-        conn = psycopg2.connect(PG_URL, connect_timeout=3)
+        conn = psycopg2.connect(PG_URL, connect_timeout=15)
         return conn
     except Exception as e:
         print(f"[-] Erro ao ligar ao PostgreSQL Cloud: {e}")
@@ -2612,7 +3676,7 @@ def init_pg_db():
             id SERIAL PRIMARY KEY, 
             nome VARCHAR, 
             cargo VARCHAR, 
-            sector_id INTEGER,
+            setor_id INTEGER,
             last_modified VARCHAR DEFAULT '2026-06-24T00:00:00',
             origem_registo VARCHAR DEFAULT 'local'
         )''')
@@ -2683,19 +3747,64 @@ def init_pg_db():
         
         # Ensure all columns exist in PostgreSQL (automatic migration)
         tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local']
+        
+        # Create trigger function for PG
+        try:
+            c.execute('''
+                CREATE OR REPLACE FUNCTION update_last_modified_column()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                   NEW.last_modified = to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS');
+                   RETURN NEW;
+                END;
+                $$ language 'plpgsql';
+            ''')
+        except Exception as ex:
+            conn.rollback()
+            print(f"[-] Erro ao criar funcao de trigger no PG: {ex}")
+            
         for t in tables:
             try:
                 c.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS last_modified VARCHAR DEFAULT '2026-06-24T00:00:00'")
             except Exception as ex:
+                conn.rollback()
                 print(f"[-] Erro ao migrar last_modified no PG para {t}: {ex}")
             try:
                 c.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS origem_registo VARCHAR DEFAULT 'local'")
             except Exception as ex:
+                conn.rollback()
                 print(f"[-] Erro ao migrar origem_registo no PG para {t}: {ex}")
+                
+            try:
+                c.execute(f'''
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'tr_update_last_modified_{t}') THEN
+                            CREATE TRIGGER tr_update_last_modified_{t}
+                            BEFORE UPDATE ON {t}
+                            FOR EACH ROW
+                            WHEN (NEW.last_modified IS NULL OR NEW.last_modified = OLD.last_modified)
+                            EXECUTE FUNCTION update_last_modified_column();
+                        END IF;
+                    END
+                    $$;
+                ''')
+            except Exception as ex:
+                conn.rollback()
+                print(f"[-] Erro ao criar trigger no PG para {t}: {ex}")
+                
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS setor_id INTEGER")
+            c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS setor_origem_id INTEGER")
+            c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS setor_destino_id INTEGER")
+        except Exception as ex:
+            conn.rollback()
+            print(f"[-] Erro ao migrar novas colunas de setor no PG: {ex}")
                 
         conn.commit()
         print("[+] Tabelas inicializadas/verificadas no PostgreSQL Cloud.")
     except Exception as e:
+        if conn: conn.rollback()
         print(f"[-] Erro ao inicializar tabelas no PostgreSQL: {e}")
     finally:
         conn.close()
@@ -2739,32 +3848,32 @@ def sync_lookup_table(table_name):
 def sync_users():
     s_conn = sqlite3.connect(DB_PATH)
     s_c = s_conn.cursor()
-    s_c.execute("SELECT username, password, perfil, nome_completo, last_modified, origem_registo FROM users")
-    s_users = {r[0]: {'password': r[1], 'perfil': r[2], 'nome_completo': r[3], 'last_modified': r[4], 'origem_registo': r[5]} for r in s_c.fetchall()}
+    s_c.execute("SELECT username, password, perfil, nome_completo, last_modified, origem_registo, setor_id FROM users")
+    s_users = {r[0]: {'password': r[1], 'perfil': r[2], 'nome_completo': r[3], 'last_modified': r[4], 'origem_registo': r[5], 'setor_id': r[6]} for r in s_c.fetchall()}
     
     pg_conn = get_pg_connection()
     if not pg_conn:
         s_conn.close()
         return False
     pg_c = pg_conn.cursor()
-    pg_c.execute("SELECT username, password, perfil, nome_completo, last_modified, origem_registo FROM users")
-    pg_users = {r[0]: {'password': r[1], 'perfil': r[2], 'nome_completo': r[3], 'last_modified': r[4], 'origem_registo': r[5]} for r in pg_c.fetchall()}
+    pg_c.execute("SELECT username, password, perfil, nome_completo, last_modified, origem_registo, setor_id FROM users")
+    pg_users = {r[0]: {'password': r[1], 'perfil': r[2], 'nome_completo': r[3], 'last_modified': r[4], 'origem_registo': r[5], 'setor_id': r[6]} for r in pg_c.fetchall()}
     
     for username, s_u in s_users.items():
         if username not in pg_users:
-            pg_c.execute("INSERT INTO users (username, password, perfil, nome_completo, last_modified, origem_registo) VALUES (%s, %s, %s, %s, %s, %s)",
-                         (username, s_u['password'], s_u['perfil'], s_u['nome_completo'], s_u['last_modified'], s_u['origem_registo']))
+            pg_c.execute("INSERT INTO users (username, password, perfil, nome_completo, last_modified, origem_registo, setor_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                         (username, s_u['password'], s_u['perfil'], s_u['nome_completo'], s_u['last_modified'], s_u['origem_registo'], s_u['setor_id']))
         elif s_u['last_modified'] > pg_users[username]['last_modified']:
-            pg_c.execute("UPDATE users SET password=%s, perfil=%s, nome_completo=%s, last_modified=%s, origem_registo=%s WHERE username=%s",
-                         (s_u['password'], s_u['perfil'], s_u['nome_completo'], s_u['last_modified'], s_u['origem_registo'], username))
+            pg_c.execute("UPDATE users SET password=%s, perfil=%s, nome_completo=%s, last_modified=%s, origem_registo=%s, setor_id=%s WHERE username=%s",
+                         (s_u['password'], s_u['perfil'], s_u['nome_completo'], s_u['last_modified'], s_u['origem_registo'], s_u['setor_id'], username))
             
     for username, pg_u in pg_users.items():
         if username not in s_users:
-            s_c.execute("INSERT INTO users (username, password, perfil, nome_completo, last_modified, origem_registo) VALUES (?, ?, ?, ?, ?, ?)",
-                        (username, pg_u['password'], pg_u['perfil'], pg_u['nome_completo'], pg_u['last_modified'], pg_u['origem_registo']))
+            s_c.execute("INSERT INTO users (username, password, perfil, nome_completo, last_modified, origem_registo, setor_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (username, pg_u['password'], pg_u['perfil'], pg_u['nome_completo'], pg_u['last_modified'], pg_u['origem_registo'], pg_u['setor_id']))
         elif pg_u['last_modified'] > s_users[username]['last_modified']:
-            s_c.execute("UPDATE users SET password=?, perfil=?, nome_completo=?, last_modified=?, origem_registo=? WHERE username=?",
-                        (pg_u['password'], pg_u['perfil'], pg_u['nome_completo'], pg_u['last_modified'], pg_u['origem_registo'], username))
+            s_c.execute("UPDATE users SET password=?, perfil=?, nome_completo=?, last_modified=?, origem_registo=?, setor_id=? WHERE username=?",
+                        (pg_u['password'], pg_u['perfil'], pg_u['nome_completo'], pg_u['last_modified'], pg_u['origem_registo'], pg_u['setor_id'], username))
             
     pg_conn.commit()
     pg_conn.close()
@@ -2777,11 +3886,11 @@ def sync_funcionarios():
     s_c = s_conn.cursor()
     
     s_c.execute("SELECT id, nome FROM setores")
-    s_sector_id_to_name = {r[0]: r[1] for r in s_c.fetchall()}
-    s_sector_name_to_id = {v: k for k, v in s_sector_id_to_name.items()}
+    s_setor_id_to_name = {r[0]: r[1] for r in s_c.fetchall()}
+    s_sector_name_to_id = {v: k for k, v in s_setor_id_to_name.items()}
     
     s_c.execute("SELECT nome, cargo, setor_id, last_modified, origem_registo FROM funcionarios")
-    s_funcs = {r[0]: {'cargo': r[1], 'sector_name': s_sector_id_to_name.get(r[2], ''), 'last_modified': r[3], 'origem_registo': r[4]} for r in s_c.fetchall()}
+    s_funcs = {r[0]: {'cargo': r[1], 'sector_name': s_setor_id_to_name.get(r[2], ''), 'last_modified': r[3], 'origem_registo': r[4]} for r in s_c.fetchall()}
     
     pg_conn = get_pg_connection()
     if not pg_conn:
@@ -2790,19 +3899,19 @@ def sync_funcionarios():
     pg_c = pg_conn.cursor()
     
     pg_c.execute("SELECT id, nome FROM setores")
-    pg_sector_id_to_name = {r[0]: r[1] for r in pg_c.fetchall()}
-    pg_sector_name_to_id = {v: k for k, v in pg_sector_id_to_name.items()}
+    pg_setor_id_to_name = {r[0]: r[1] for r in pg_c.fetchall()}
+    pg_sector_name_to_id = {v: k for k, v in pg_setor_id_to_name.items()}
     
-    pg_c.execute("SELECT nome, cargo, sector_id, last_modified, origem_registo FROM funcionarios")
-    pg_funcs = {r[0]: {'cargo': r[1], 'sector_name': pg_sector_id_to_name.get(r[2], ''), 'last_modified': r[3], 'origem_registo': r[4]} for r in pg_c.fetchall()}
+    pg_c.execute("SELECT nome, cargo, setor_id, last_modified, origem_registo FROM funcionarios")
+    pg_funcs = {r[0]: {'cargo': r[1], 'sector_name': pg_setor_id_to_name.get(r[2], ''), 'last_modified': r[3], 'origem_registo': r[4]} for r in pg_c.fetchall()}
     
     for nome, s_f in s_funcs.items():
         pg_sec_id = pg_sector_name_to_id.get(s_f['sector_name'])
         if nome not in pg_funcs:
-            pg_c.execute("INSERT INTO funcionarios (nome, cargo, sector_id, last_modified, origem_registo) VALUES (%s, %s, %s, %s, %s)",
+            pg_c.execute("INSERT INTO funcionarios (nome, cargo, setor_id, last_modified, origem_registo) VALUES (%s, %s, %s, %s, %s)",
                          (nome, s_f['cargo'], pg_sec_id, s_f['last_modified'], s_f['origem_registo']))
         elif s_f['last_modified'] > pg_funcs[nome]['last_modified']:
-            pg_c.execute("UPDATE funcionarios SET cargo=%s, sector_id=%s, last_modified=%s, origem_registo=%s WHERE nome=%s",
+            pg_c.execute("UPDATE funcionarios SET cargo=%s, setor_id=%s, last_modified=%s, origem_registo=%s WHERE nome=%s",
                          (s_f['cargo'], pg_sec_id, s_f['last_modified'], s_f['origem_registo'], nome))
             
     for nome, pg_f in pg_funcs.items():
@@ -2828,15 +3937,16 @@ def sync_movimentos():
     s_emp_id_to_name = {r[0]: r[1] for r in s_c.fetchall()}
     s_emp_name_to_id = {v: k for k, v in s_emp_id_to_name.items()}
     
-    s_c.execute('''SELECT guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, last_modified, origem_registo FROM movimentos''')
+    s_c.execute('''SELECT guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, last_modified, origem_registo FROM movimentos''')
     s_movs = {}
     for r in s_c.fetchall():
         s_movs[r[0]] = {
             'tipo': r[1], 'equipamento': r[2], 'origem_destino': r[3], 'motivo': r[4], 'data': r[5],
             'status': r[6], 'tecnico': r[7], 'relatorio': r[8], 'emp_name': s_emp_id_to_name.get(r[9], ''),
             'numero_serie': r[10], 'marca': r[11], 'entregue_por': r[12], 'recebido_por': r[13],
-            'agente_protecao': r[14], 'fornecedor': r[15], 'quantidade': r[16], 'last_modified': r[17],
-            'origem_registo': r[18]
+            'agente_protecao': r[14], 'fornecedor': r[15], 'quantidade': r[16],
+            'setor_origem_id': r[17], 'setor_destino_id': r[18], 'last_modified': r[19],
+            'origem_registo': r[20]
         }
         
     pg_conn = get_pg_connection()
@@ -2849,52 +3959,57 @@ def sync_movimentos():
     pg_emp_id_to_name = {r[0]: r[1] for r in pg_c.fetchall()}
     pg_emp_name_to_id = {v: k for k, v in pg_emp_id_to_name.items()}
     
-    pg_c.execute('''SELECT guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, last_modified, origem_registo FROM movimentos''')
+    pg_c.execute('''SELECT guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, last_modified, origem_registo FROM movimentos''')
     pg_movs = {}
     for r in pg_c.fetchall():
         pg_movs[r[0]] = {
             'tipo': r[1], 'equipamento': r[2], 'origem_destino': r[3], 'motivo': r[4], 'data': r[5],
             'status': r[6], 'tecnico': r[7], 'relatorio': r[8], 'emp_name': pg_emp_id_to_name.get(r[9], ''),
             'numero_serie': r[10], 'marca': r[11], 'entregue_por': r[12], 'recebido_por': r[13],
-            'agente_protecao': r[14], 'fornecedor': r[15], 'quantidade': r[16], 'last_modified': r[17],
-            'origem_registo': r[18]
+            'agente_protecao': r[14], 'fornecedor': r[15], 'quantidade': r[16],
+            'setor_origem_id': r[17], 'setor_destino_id': r[18], 'last_modified': r[19],
+            'origem_registo': r[20]
         }
         
     for guia, s_m in s_movs.items():
         pg_emp_id = pg_emp_name_to_id.get(s_m['emp_name'])
         if guia not in pg_movs:
             pg_c.execute('''INSERT INTO movimentos 
-                (guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, last_modified, origem_registo) 
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+                (guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, last_modified, origem_registo) 
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
                 (guia, s_m['tipo'], s_m['equipamento'], s_m['origem_destino'], s_m['motivo'], s_m['data'],
                  s_m['status'], s_m['tecnico'], s_m['relatorio'], pg_emp_id, s_m['numero_serie'], s_m['marca'],
-                 s_m['entregue_por'], s_m['recebido_por'], s_m['agente_protecao'], s_m['fornecedor'], s_m['quantidade'], s_m['last_modified'], s_m['origem_registo']))
+                 s_m['entregue_por'], s_m['recebido_por'], s_m['agente_protecao'], s_m['fornecedor'], s_m['quantidade'],
+                 s_m['setor_origem_id'], s_m['setor_destino_id'], s_m['last_modified'], s_m['origem_registo']))
         elif s_m['last_modified'] > pg_movs[guia]['last_modified']:
             pg_c.execute('''UPDATE movimentos SET 
                 tipo=%s, equipamento=%s, origem_destino=%s, motivo=%s, data=%s, status=%s, tecnico=%s, relatorio=%s, 
                 funcionario_id=%s, numero_serie=%s, marca=%s, entregue_por=%s, recebido_por=%s, agente_protecao=%s, 
-                fornecedor=%s, quantidade=%s, last_modified=%s, origem_registo=%s WHERE guia=%s''',
+                fornecedor=%s, quantidade=%s, setor_origem_id=%s, setor_destino_id=%s, last_modified=%s, origem_registo=%s WHERE guia=%s''',
                 (s_m['tipo'], s_m['equipamento'], s_m['origem_destino'], s_m['motivo'], s_m['data'],
                  s_m['status'], s_m['tecnico'], s_m['relatorio'], pg_emp_id, s_m['numero_serie'], s_m['marca'],
-                 s_m['entregue_por'], s_m['recebido_por'], s_m['agente_protecao'], s_m['fornecedor'], s_m['quantidade'], s_m['last_modified'], s_m['origem_registo'], guia))
+                 s_m['entregue_por'], s_m['recebido_por'], s_m['agente_protecao'], s_m['fornecedor'], s_m['quantidade'],
+                 s_m['setor_origem_id'], s_m['setor_destino_id'], s_m['last_modified'], s_m['origem_registo'], guia))
                  
     for guia, pg_m in pg_movs.items():
         s_emp_id = s_emp_name_to_id.get(pg_m['emp_name'])
         if guia not in s_movs:
             s_c.execute('''INSERT INTO movimentos 
-                (guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, last_modified, origem_registo) 
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, relatorio, funcionario_id, numero_serie, marca, entregue_por, recebido_por, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, last_modified, origem_registo) 
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (guia, pg_m['tipo'], pg_m['equipamento'], pg_m['origem_destino'], pg_m['motivo'], pg_m['data'],
                  pg_m['status'], pg_m['tecnico'], pg_m['relatorio'], s_emp_id, pg_m['numero_serie'], pg_m['marca'],
-                 pg_m['entregue_por'], pg_m['recebido_por'], pg_m['agente_protecao'], pg_m['fornecedor'], pg_m['quantidade'], pg_m['last_modified'], pg_m['origem_registo']))
+                 pg_m['entregue_por'], pg_m['recebido_por'], pg_m['agente_protecao'], pg_m['fornecedor'], pg_m['quantidade'],
+                 pg_m['setor_origem_id'], pg_m['setor_destino_id'], pg_m['last_modified'], pg_m['origem_registo']))
         elif pg_m['last_modified'] > s_movs[guia]['last_modified']:
             s_c.execute('''UPDATE movimentos SET 
                 tipo=?, equipamento=?, origem_destino=?, motivo=?, data=?, status=?, tecnico=?, relatorio=?, 
                 funcionario_id=?, numero_serie=?, marca=?, entregue_por=?, recebido_por=?, agente_protecao=?, 
-                fornecedor=?, quantidade=?, last_modified=?, origem_registo=? WHERE guia=?''',
+                fornecedor=?, quantidade=?, setor_origem_id=?, setor_destino_id=?, last_modified=?, origem_registo=? WHERE guia=?''',
                 (pg_m['tipo'], pg_m['equipamento'], pg_m['origem_destino'], pg_m['motivo'], pg_m['data'],
                  pg_m['status'], pg_m['tecnico'], pg_m['relatorio'], s_emp_id, pg_m['numero_serie'], pg_m['marca'],
-                 pg_m['entregue_por'], pg_m['recebido_por'], pg_m['agente_protecao'], pg_m['fornecedor'], pg_m['quantidade'], pg_m['last_modified'], pg_m['origem_registo'], guia))
+                 pg_m['entregue_por'], pg_m['recebido_por'], pg_m['agente_protecao'], pg_m['fornecedor'], pg_m['quantidade'],
+                 pg_m['setor_origem_id'], pg_m['setor_destino_id'], pg_m['last_modified'], pg_m['origem_registo'], guia))
                  
     pg_conn.commit()
     pg_conn.close()
@@ -2905,13 +4020,13 @@ def sync_movimentos():
 def sync_inventario_local():
     s_conn = sqlite3.connect(DB_PATH)
     s_c = s_conn.cursor()
-    s_c.execute("SELECT equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo FROM inventario_local")
+    s_c.execute("SELECT equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo, setor_id FROM inventario_local")
     s_items = {}
     for r in s_c.fetchall():
         key = f"{r[0]}::{r[1]}::{r[2]}"
         s_items[key] = {
             'equipamento': r[0], 'marca': r[1], 'numero_serie': r[2], 'quantidade': r[3], 'status': r[4],
-            'data_registo': r[5], 'observacoes': r[6], 'last_modified': r[7], 'origem_registo': r[8]
+            'data_registo': r[5], 'observacoes': r[6], 'last_modified': r[7], 'origem_registo': r[8], 'setor_id': r[9]
         }
         
     pg_conn = get_pg_connection()
@@ -2919,38 +4034,38 @@ def sync_inventario_local():
         s_conn.close()
         return False
     pg_c = pg_conn.cursor()
-    pg_c.execute("SELECT equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo FROM inventario_local")
+    pg_c.execute("SELECT equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo, setor_id FROM inventario_local")
     pg_items = {}
     for r in pg_c.fetchall():
         key = f"{r[0]}::{r[1]}::{r[2]}"
         pg_items[key] = {
             'equipamento': r[0], 'marca': r[1], 'numero_serie': r[2], 'quantidade': r[3], 'status': r[4],
-            'data_registo': r[5], 'observacoes': r[6], 'last_modified': r[7], 'origem_registo': r[8]
+            'data_registo': r[5], 'observacoes': r[6], 'last_modified': r[7], 'origem_registo': r[8], 'setor_id': r[9]
         }
         
     for key, s_i in s_items.items():
         if key not in pg_items:
             pg_c.execute('''INSERT INTO inventario_local 
-                (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo) 
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
-                (s_i['equipamento'], s_i['marca'], s_i['numero_serie'], s_i['quantidade'], s_i['status'], s_i['data_registo'], s_i['observacoes'], s_i['last_modified'], s_i['origem_registo']))
+                (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo, setor_id) 
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+                (s_i['equipamento'], s_i['marca'], s_i['numero_serie'], s_i['quantidade'], s_i['status'], s_i['data_registo'], s_i['observacoes'], s_i['last_modified'], s_i['origem_registo'], s_i['setor_id']))
         elif s_i['last_modified'] > pg_items[key]['last_modified']:
             pg_c.execute('''UPDATE inventario_local SET 
-                quantidade=%s, status=%s, data_registo=%s, observacoes=%s, last_modified=%s, origem_registo=%s 
+                quantidade=%s, status=%s, data_registo=%s, observacoes=%s, last_modified=%s, origem_registo=%s, setor_id=%s 
                 WHERE equipamento=%s AND marca=%s AND numero_serie=%s''',
-                (s_i['quantidade'], s_i['status'], s_i['data_registo'], s_i['observacoes'], s_i['last_modified'], s_i['origem_registo'], s_i['equipamento'], s_i['marca'], s_i['numero_serie']))
+                (s_i['quantidade'], s_i['status'], s_i['data_registo'], s_i['observacoes'], s_i['last_modified'], s_i['origem_registo'], s_i['setor_id'], s_i['equipamento'], s_i['marca'], s_i['numero_serie']))
                 
     for key, pg_i in pg_items.items():
         if key not in s_items:
             s_c.execute('''INSERT INTO inventario_local 
-                (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo) 
-                VALUES (?,?,?,?,?,?,?,?,?)''',
-                (pg_i['equipamento'], pg_i['marca'], pg_i['numero_serie'], pg_i['quantidade'], pg_i['status'], pg_i['data_registo'], pg_i['observacoes'], pg_i['last_modified'], pg_i['origem_registo']))
+                (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, last_modified, origem_registo, setor_id) 
+                VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                (pg_i['equipamento'], pg_i['marca'], pg_i['numero_serie'], pg_i['quantidade'], pg_i['status'], pg_i['data_registo'], pg_i['observacoes'], pg_i['last_modified'], pg_i['origem_registo'], pg_i['setor_id']))
         elif pg_i['last_modified'] > s_items[key]['last_modified']:
             s_c.execute('''UPDATE inventario_local SET 
-                quantidade=?, status=?, data_registo=?, observacoes=?, last_modified=?, origem_registo=? 
+                quantidade=?, status=?, data_registo=?, observacoes=?, last_modified=?, origem_registo=?, setor_id=? 
                 WHERE equipamento=? AND marca=? AND numero_serie=?''',
-                (pg_i['quantidade'], pg_i['status'], pg_i['data_registo'], pg_i['observacoes'], pg_i['last_modified'], pg_i['origem_registo'], pg_i['equipamento'], pg_i['marca'], pg_i['numero_serie']))
+                (pg_i['quantidade'], pg_i['status'], pg_i['data_registo'], pg_i['observacoes'], pg_i['last_modified'], pg_i['origem_registo'], pg_i['setor_id'], pg_i['equipamento'], pg_i['marca'], pg_i['numero_serie']))
                 
     pg_conn.commit()
     pg_conn.close()

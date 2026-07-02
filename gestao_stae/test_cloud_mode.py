@@ -31,11 +31,11 @@ try:
     rows = c.execute("SELECT id FROM users LIMIT 2").fetchall()
     print(f"Chained result rows: {rows}")
     
-    # Test query with column mapping: select from funcionarios using setor_id
-    print("\nTesting column mapping (setor_id -> sector_id) on funcionarios...")
+    # Test query: select from funcionarios using setor_id
+    print("\nTesting querying funcionarios with setor_id...")
     c.execute("SELECT id, nome, cargo, setor_id FROM funcionarios LIMIT 1")
     func_row = c.fetchone()
-    print(f"Funcionarios row (mapped successfully!): {func_row}")
+    print(f"Funcionarios row: {func_row}")
     
     conn.close()
     print("\nAll tests passed successfully!")
