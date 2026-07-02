@@ -11,5 +11,8 @@
       "src": "/(.*)",
       "dest": "gestao_stae/app.py"
     }
-  ]
+  ],
+  "env": {
+    "CLOUD_MODE": "true"
+  }
 }

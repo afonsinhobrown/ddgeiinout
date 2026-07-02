@@ -4,7 +4,7 @@ echo   STAE - Executar Servidor Local
 echo ==========================================
 echo.
 echo 1. Verificando dependencias...
-py -m pip install flask reportlab openpyxl
+py -m pip install flask reportlab openpyxl psycopg2-binary
 echo.
 echo 2. Iniciando servidor...
 py app.py
