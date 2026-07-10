@@ -227,7 +227,7 @@ def check_db_integrity(c):
             c.execute("ALTER TABLE users ADD COLUMN setor_id INTEGER")
             c.execute("UPDATE users SET setor_id = 1 WHERE perfil != 'admin' AND setor_id IS NULL")
         
-        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local']
+        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material']
         for t in tables:
             try:
                 c.execute(f"PRAGMA table_info({t})")
@@ -243,7 +243,7 @@ def check_db_integrity(c):
 
 def create_triggers(c):
     origem_padrao = os.environ.get("ORIGEM_CADASTRO") or "local"
-    tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local']
+    tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material']
     for t in tables:
         c.execute(f'''
             CREATE TRIGGER IF NOT EXISTS tr_insert_{t}
@@ -3855,7 +3855,7 @@ def init_pg_db():
         )''')
         
         # Ensure all columns exist in PostgreSQL (automatic migration)
-        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local']
+        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material']
         
         # Create trigger function for PG
         try:
@@ -3932,7 +3932,16 @@ SYNC_CONFIG = {
     'motivos': ['nome'],
     'fornecedores': ['nome'],
     'instituicoes': ['nome'],
-    'inventario_local': ['equipamento', 'marca', 'numero_serie']
+    'inventario_local': ['equipamento', 'marca', 'numero_serie'],
+    'eleitoral_provincia': ['codigo'],
+    'eleitoral_pais_diaspora': ['codigo_iso'],
+    'eleitoral_local_armazenamento': ['tipo', 'nome'],
+    'eleitoral_categoria_material': ['nome'],
+    'eleitoral_tipo_material': ['nome', 'variante'],
+    'eleitoral_processo_eleitoral': ['nome', 'ano'],
+    'eleitoral_material_sobrante': ['processo_id', 'local_id', 'tipo_material_id'],
+    'eleitoral_evento': ['processo_id', 'nome'],
+    'eleitoral_movimento_material': ['processo_id', 'local_origem_id', 'local_destino_id', 'data_envio']
 }
 
 def get_table_columns(cursor, table_name, is_pg=False):
