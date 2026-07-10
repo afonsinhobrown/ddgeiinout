@@ -3996,6 +3996,11 @@ def sync_databases():
         s_conn.close()
 
 init_db()
+
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from routes_eleitoral import eleitoral_bp
 app.register_blueprint(eleitoral_bp)
 
