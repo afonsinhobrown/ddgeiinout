@@ -377,6 +377,148 @@ def update_estado_evento(id):
     flash(f"Estado do evento actualizado para {estado}!", "success")
     return redirect(url_for('eleitoral.processos'))
 
+import io
+from flask import send_file
+
+@eleitoral_bp.route('/relatorios/exportar_excel')
+def exportar_excel():
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
+    
+    processo_id = request.args.get('processo_id')
+    tipo_material_id = request.args.getlist('tipo_material_id')
+    tipo_material_id = [x for x in tipo_material_id if x]
+    
+    conds = []
+    params = []
+    if processo_id:
+        conds.append(f"s.processo_id = {'%s' if is_pg else '?'}")
+        params.append(processo_id)
+    if tipo_material_id:
+        placeholders = ','.join(['%s' if is_pg else '?'] * len(tipo_material_id))
+        conds.append(f"s.tipo_material_id IN ({placeholders})")
+        params.extend(tipo_material_id)
+        
+    cond_proc = "WHERE " + " AND ".join(conds) if conds else ""
+    param = tuple(params)
+    
+    # Por Categoria
+    c.execute(f'''
+        SELECT c.nome as categoria, t.nome as tipo, t.variante, SUM(s.quantidade_total) as total, SUM(s.quantidade_bom) as bom, SUM(s.quantidade_mau) as mau
+        FROM eleitoral_material_sobrante s
+        JOIN eleitoral_tipo_material t ON s.tipo_material_id = t.id
+        JOIN eleitoral_categoria_material c ON t.categoria_id = c.id
+        {cond_proc}
+        GROUP BY c.nome, t.nome, t.variante
+        ORDER BY c.nome, total DESC
+    ''', param)
+    relatorio_categoria = c.fetchall()
+    
+    # Por Local
+    c.execute(f'''
+        SELECT l.nome as provincia, t.nome as tipo, t.variante, SUM(s.quantidade_total) as total, SUM(s.quantidade_bom) as bom, SUM(s.quantidade_mau) as mau
+        FROM eleitoral_material_sobrante s
+        JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
+        JOIN eleitoral_tipo_material t ON s.tipo_material_id = t.id
+        {cond_proc}
+        GROUP BY l.nome, t.nome, t.variante
+        ORDER BY l.nome, total DESC
+    ''', param)
+    relatorio_provincia = c.fetchall()
+    
+    conn.close()
+    
+    from openpyxl import Workbook
+    from openpyxl.styles import PatternFill, Font, Alignment
+    
+    wb = Workbook()
+    
+    # Estilos
+    header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    
+    bom_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+    bom_font = Font(color="166534", bold=True)
+    
+    mau_fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+    mau_font = Font(color="991B1B", bold=True)
+    
+    # Aba 1: Categoria
+    ws1 = wb.active
+    ws1.title = "Por Categoria"
+    headers = ["Categoria", "Tipo de Material", "Total", "Bom", "Mau"]
+    ws1.append(headers)
+    for col in range(1, 6):
+        cell = ws1.cell(row=1, column=col)
+        cell.fill = header_fill
+        cell.font = header_font
+        
+    for r in relatorio_categoria:
+        tipo_str = f"{r['tipo' if is_pg else 'tipo']}"
+        if r['variante' if is_pg else 'variante']:
+            tipo_str += f" ({r['variante' if is_pg else 'variante']})"
+            
+        ws1.append([
+            r['categoria' if is_pg else 'categoria'],
+            tipo_str,
+            r['total' if is_pg else 'total'],
+            r['bom' if is_pg else 'bom'],
+            r['mau' if is_pg else 'mau']
+        ])
+        
+        # Colorir células Bom e Mau
+        ws1.cell(row=ws1.max_row, column=4).fill = bom_fill
+        ws1.cell(row=ws1.max_row, column=4).font = bom_font
+        ws1.cell(row=ws1.max_row, column=5).fill = mau_fill
+        ws1.cell(row=ws1.max_row, column=5).font = mau_font
+
+    # Aba 2: Província
+    ws2 = wb.create_sheet(title="Por Local")
+    ws2.append(["Local", "Tipo de Material", "Total", "Bom", "Mau"])
+    for col in range(1, 6):
+        cell = ws2.cell(row=1, column=col)
+        cell.fill = header_fill
+        cell.font = header_font
+        
+    for r in relatorio_provincia:
+        tipo_str = f"{r['tipo' if is_pg else 'tipo']}"
+        if r['variante' if is_pg else 'variante']:
+            tipo_str += f" ({r['variante' if is_pg else 'variante']})"
+            
+        ws2.append([
+            r['provincia' if is_pg else 'provincia'],
+            tipo_str,
+            r['total' if is_pg else 'total'],
+            r['bom' if is_pg else 'bom'],
+            r['mau' if is_pg else 'mau']
+        ])
+        
+        # Colorir células Bom e Mau
+        ws2.cell(row=ws2.max_row, column=4).fill = bom_fill
+        ws2.cell(row=ws2.max_row, column=4).font = bom_font
+        ws2.cell(row=ws2.max_row, column=5).fill = mau_fill
+        ws2.cell(row=ws2.max_row, column=5).font = mau_font
+        
+    for ws in [ws1, ws2]:
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = (max_length + 2)
+            ws.column_dimensions[column].width = adjusted_width
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    return send_file(output, download_name="relatorio_estatistico.xlsx", as_attachment=True, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 @eleitoral_bp.route('/relatorios')
 def relatorios():
     conn, is_pg = get_eleitoral_db()

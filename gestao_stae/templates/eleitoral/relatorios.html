@@ -2,8 +2,9 @@
 
 {% block content %}
 <div class="header-actions" style="justify-content: space-between;">
-    <h2>Relatórios Analíticos</h2>
-    <div>
+    <h2>Relatórios Analíticos e Estatísticos</h2>
+    <div style="display: flex; gap: 0.5rem;">
+        <a href="{{ url_for('eleitoral.exportar_excel', processo_id=processo_id, tipo_material_id=tipo_material_id) }}" class="btn btn-outline" style="color:#166534; border-color:#166534;">📊 Exportar Excel</a>
         <button class="btn btn-outline" onclick="exportarRelatorioPDF()">📄 Exportar PDF</button>
     </div>
 </div>
@@ -57,6 +58,22 @@
         <strong>Nota:</strong> Os Totais Globais estão ocultos. Por favor selecione um <strong>Tipo de Material</strong> no filtro acima para ver as agregações numéricas (somar consumíveis e equipamentos geraria números sem significado).
     </div>
     {% endif %}
+
+    <!-- Gráficos Estatísticos -->
+    <div style="display:flex; gap: 2rem; margin-bottom: 2rem;">
+        <div class="card" style="flex:1;">
+            <h3 style="text-align:center; font-size:1rem; color:#475569; margin-bottom:1rem;">Distribuição por Categoria</h3>
+            <div style="height: 300px; display:flex; justify-content:center;">
+                <canvas id="graficoCategoria"></canvas>
+            </div>
+        </div>
+        <div class="card" style="flex:1;">
+            <h3 style="text-align:center; font-size:1rem; color:#475569; margin-bottom:1rem;">Top Locais (Total em Armazém)</h3>
+            <div style="height: 300px; display:flex; justify-content:center;">
+                <canvas id="graficoLocal"></canvas>
+            </div>
+        </div>
+    </div>
 
     <!-- Relatório por Categoria -->
     <div class="card" style="margin-bottom: 2rem;">
@@ -148,6 +165,7 @@
 
 {% block scripts %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 function exportarRelatorioPDF() {
     var element = document.getElementById('area-relatorios');
@@ -159,6 +177,63 @@ function exportarRelatorioPDF() {
       jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
     html2pdf().set(opt).from(element).save();
+}
+
+// Prepara dados para os gráficos
+const categorias = [
+    {% for r in relatorio_categoria %}
+    { nome: "{{ r.categoria }} - {{ r.tipo }}", total: {{ r.total }} },
+    {% endfor %}
+];
+
+const locais = [
+    {% for r in relatorio_provincia %}
+    { nome: "{{ r.provincia }}", total: {{ r.total }} },
+    {% endfor %}
+];
+
+// Agrupa Locais para não repetir nomes no eixo X
+const locaisAgrupados = {};
+locais.forEach(l => {
+    if(!locaisAgrupados[l.nome]) locaisAgrupados[l.nome] = 0;
+    locaisAgrupados[l.nome] += l.total;
+});
+
+// Renderizar Gráfico de Categorias (Pie)
+if(categorias.length > 0) {
+    const ctxCat = document.getElementById('graficoCategoria').getContext('2d');
+    new Chart(ctxCat, {
+        type: 'doughnut',
+        data: {
+            labels: categorias.map(c => c.nome),
+            datasets: [{
+                data: categorias.map(c => c.total),
+                backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#64748b']
+            }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+    });
+}
+
+// Renderizar Gráfico de Locais (Bar)
+if(Object.keys(locaisAgrupados).length > 0) {
+    const ctxLoc = document.getElementById('graficoLocal').getContext('2d');
+    new Chart(ctxLoc, {
+        type: 'bar',
+        data: {
+            labels: Object.keys(locaisAgrupados),
+            datasets: [{
+                label: 'Quantidade Total',
+                data: Object.values(locaisAgrupados),
+                backgroundColor: '#3b82f6'
+            }]
+        },
+        options: { 
+            responsive: true, 
+            maintainAspectRatio: false,
+            scales: { y: { beginAtZero: true } }
+        }
+    });
 }
 </script>
 {% endblock %}
