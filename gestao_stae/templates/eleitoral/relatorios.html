@@ -1,0 +1,164 @@
+{% extends "eleitoral/base.html" %}
+
+{% block content %}
+<div class="header-actions" style="justify-content: space-between;">
+    <h2>Relatórios Analíticos</h2>
+    <div>
+        <button class="btn btn-outline" onclick="exportarRelatorioPDF()">📄 Exportar PDF</button>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 2rem;">
+    <form method="GET" action="{{ url_for('eleitoral.relatorios') }}" style="display:flex; gap: 1rem; align-items:flex-end;">
+        <div style="flex:1;">
+            <label style="display:block; font-size:0.8rem; color:#64748b; margin-bottom:0.2rem;">Filtro de Processo:</label>
+            <select name="processo_id" class="btn btn-outline" style="width:100%; padding:0.5rem; text-align:left; background:#f8fafc;">
+                <option value="">Todos os Processos</option>
+                {% for p in processos %}
+                <option value="{{ p.id }}" {% if p.id|string == processo_id|string %}selected{% endif %}>{{ p.nome }} ({{ p.ano }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="flex:1;">
+            <label style="display:block; font-size:0.8rem; color:#64748b; margin-bottom:0.2rem;">Tipo de Material:</label>
+            <select name="tipo_material_id" multiple class="btn btn-outline" style="width:100%; padding:0.5rem; text-align:left; background:#f8fafc; height:40px;">
+                <option value="">Todos os Tipos de Material...</option>
+                {% for t in tipos_material %}
+                <option value="{{ t.id }}" {% if t.id|string in tipo_material_id %}selected{% endif %}>{{ t.nome }} {% if t.variante %}({{ t.variante }}){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <button type="submit" class="btn btn-blue">Aplicar Filtro</button>
+        </div>
+    </form>
+</div>
+
+<div id="area-relatorios">
+
+    <!-- Totais Globais -->
+    {% if tipo_material_id %}
+    <div style="display: flex; gap: 1rem; margin-bottom: 2rem;">
+        <div class="card" style="flex:1; text-align:center; background:#f1f5f9; border:none;">
+            <h3 style="margin-bottom:0.5rem; color:#475569; font-size:1rem;">Total Global</h3>
+            <p style="font-size:1.8rem; font-weight:bold; margin:0; color:#1e293b;">{{ "%.2f"|format(resumo.total|default(0)) }}</p>
+        </div>
+        <div class="card" style="flex:1; text-align:center; background:#dcfce7; border:none;">
+            <h3 style="margin-bottom:0.5rem; color:#166534; font-size:1rem;">Bom Estado</h3>
+            <p style="font-size:1.8rem; font-weight:bold; margin:0; color:#22c55e;">{{ "%.2f"|format(resumo.bom|default(0)) }}</p>
+        </div>
+        <div class="card" style="flex:1; text-align:center; background:#fee2e2; border:none;">
+            <h3 style="margin-bottom:0.5rem; color:#991b1b; font-size:1rem;">Mau Estado</h3>
+            <p style="font-size:1.8rem; font-weight:bold; margin:0; color:#ef4444;">{{ "%.2f"|format(resumo.mau|default(0)) }}</p>
+        </div>
+    </div>
+    {% else %}
+    <div class="alert alert-success" style="background:#f8fafc; color:#475569; border: 1px solid #e2e8f0;">
+        <strong>Nota:</strong> Os Totais Globais estão ocultos. Por favor selecione um <strong>Tipo de Material</strong> no filtro acima para ver as agregações numéricas (somar consumíveis e equipamentos geraria números sem significado).
+    </div>
+    {% endif %}
+
+    <!-- Relatório por Categoria -->
+    <div class="card" style="margin-bottom: 2rem;">
+        <h3>Agregação por Categoria</h3>
+        <table style="width: 100%;">
+            <thead>
+                <tr style="background:#f8fafc;">
+                    <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #e2e8f0;">Categoria</th>
+                    <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #e2e8f0;">Tipo de Material</th>
+                    <th style="text-align:right; padding:0.5rem; border-bottom:2px solid #e2e8f0;">Total</th>
+                    <th style="text-align:right; padding:0.5rem; border-bottom:2px solid #e2e8f0; color:#166534;">Bom</th>
+                    <th style="text-align:right; padding:0.5rem; border-bottom:2px solid #e2e8f0; color:#991b1b;">Mau</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in relatorio_categoria %}
+                <tr>
+                    <td style="padding:0.5rem; border-bottom:1px solid #f1f5f9;"><strong>{{ r.categoria }}</strong></td>
+                    <td style="padding:0.5rem; border-bottom:1px solid #f1f5f9;">{{ r.tipo }} {% if r.variante %}<span style="color:#64748b;">({{ r.variante }})</span>{% endif %}</td>
+                    <td style="text-align:right; padding:0.5rem; border-bottom:1px solid #f1f5f9;">{{ r.total }}</td>
+                    <td style="text-align:right; padding:0.5rem; border-bottom:1px solid #f1f5f9; color:#166534;">{{ r.bom }}</td>
+                    <td style="text-align:right; padding:0.5rem; border-bottom:1px solid #f1f5f9; color:#991b1b;">{{ r.mau }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" style="text-align:center; padding:1rem;">Sem dados para mostrar.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Relatório por Local de Armazenamento -->
+    <div class="card" style="margin-bottom: 2rem;">
+        <h3>Totais por Local de Armazenamento</h3>
+        <table style="width: 100%;">
+            <thead>
+                <tr style="background:#f8fafc;">
+                    <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #e2e8f0;">Local</th>
+                    <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #e2e8f0;">Tipo de Material</th>
+                    <th style="text-align:right; padding:0.5rem; border-bottom:2px solid #e2e8f0;">Total</th>
+                    <th style="text-align:right; padding:0.5rem; border-bottom:2px solid #e2e8f0; color:#166534;">Bom</th>
+                    <th style="text-align:right; padding:0.5rem; border-bottom:2px solid #e2e8f0; color:#991b1b;">Mau</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in relatorio_provincia %}
+                <tr>
+                    <td style="padding:0.5rem; border-bottom:1px solid #f1f5f9;"><strong>{{ r.provincia }}</strong></td>
+                    <td style="padding:0.5rem; border-bottom:1px solid #f1f5f9;">{{ r.tipo }} {% if r.variante %}<span style="color:#64748b;">({{ r.variante }})</span>{% endif %}</td>
+                    <td style="text-align:right; padding:0.5rem; border-bottom:1px solid #f1f5f9;">{{ r.total }}</td>
+                    <td style="text-align:right; padding:0.5rem; border-bottom:1px solid #f1f5f9; color:#166534;">{{ r.bom }}</td>
+                    <td style="text-align:right; padding:0.5rem; border-bottom:1px solid #f1f5f9; color:#991b1b;">{{ r.mau }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" style="text-align:center; padding:1rem;">Sem dados geográficos registados nesta pesquisa.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Relatório Detalhado por Tipo de Material -->
+    <div class="card" style="margin-bottom: 2rem;">
+        <h3>Detalhe: Agregação por Tipo de Material</h3>
+        <table style="width: 100%;">
+            <thead>
+                <tr style="background:#f8fafc;">
+                    <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #e2e8f0;">Tipo / Variante</th>
+                    <th style="text-align:right; padding:0.5rem; border-bottom:2px solid #e2e8f0;">Total</th>
+                    <th style="text-align:right; padding:0.5rem; border-bottom:2px solid #e2e8f0; color:#166534;">Bom</th>
+                    <th style="text-align:right; padding:0.5rem; border-bottom:2px solid #e2e8f0; color:#991b1b;">Mau</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in relatorio_tipo %}
+                <tr>
+                    <td style="padding:0.5rem; border-bottom:1px solid #f1f5f9;">{{ r.tipo }} {% if r.variante %}<span style="color:#64748b;">({{ r.variante }})</span>{% endif %}</td>
+                    <td style="text-align:right; padding:0.5rem; border-bottom:1px solid #f1f5f9; font-weight:bold;">{{ r.total }}</td>
+                    <td style="text-align:right; padding:0.5rem; border-bottom:1px solid #f1f5f9; color:#166534;">{{ r.bom }}</td>
+                    <td style="text-align:right; padding:0.5rem; border-bottom:1px solid #f1f5f9; color:#991b1b;">{{ r.mau }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" style="text-align:center; padding:1rem;">Sem dados.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script>
+function exportarRelatorioPDF() {
+    var element = document.getElementById('area-relatorios');
+    var opt = {
+      margin:       0.5,
+      filename:     'relatorio_sobrantes.pdf',
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2 },
+      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+    };
+    html2pdf().set(opt).from(element).save();
+}
+</script>
+{% endblock %}

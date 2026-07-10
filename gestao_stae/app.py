@@ -475,8 +475,9 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
             <a href="/inventario" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📦 Inventário DDGEI</a>
             <a href="/movimentos" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📋 Todos os Movimentos</a>
             {% if session.perfil == 'admin' %}
-            <a href=\"/relatorios\" class=\"btn btn-outline\" style=\"background:#e2e8f0; color:#0f172a\"> 📊 Dashboard de Relatórios</a>
-            <a href=\"/cadastros\" class=\"btn btn-outline\" style=\"background:#e2e8f0; color:#0f172a\"> ⚙️ Cadastros</a>
+            <a href="/relatorios" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a"> 📊 Dashboard de Relatórios</a>
+            <a href="/cadastros" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a"> 📝 Cadastros</a>
+            <a href="/eleitoral" class="btn btn-outline" style="background:#0369a1; color:white; font-weight:bold"> 🗳️ Gestão Eleitoral</a>
             {% endif %}
             <button id="syncBtn" onclick="syncCloud()" class="btn btn-outline" style="margin-left:auto; font-weight:bold; background:#10b981; color:white; border:none; cursor:pointer; display:flex; align-items:center; gap:0.5rem; padding:0.5rem 1rem; border-radius:0.5rem; transition: all 0.3s;">
                 🔄 Sincronizar Nuvem
@@ -1105,6 +1106,10 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         <option value="">Selecione o Setor (Opcional)</option>
                         {% for s in setores %}<option value="{{s.id}}">{{s.nome}}</option>{% endfor %}
                     </select>
+                    <select name="eleitoral_local_id">
+                        <option value="">Selecione o Local Eleitoral (Opcional - STAE)</option>
+                        {% for l in eleitoral_locais %}<option value="{{l.id}}">{{l.tipo}} - {{l.nome}}</option>{% endfor %}
+                    </select>
                     <button class="btn" style="background:#1e293b; color:white; margin-top:1rem; width:100%">Salvar Usuário</button>
                 </form>
                 <h4 style="margin-top:2rem">Usuários do Sistema</h4>
@@ -1117,7 +1122,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                                 <small style="color:#64748b;">{{u.username}} ({{u.perfil}})</small>
                             </div>
                             <div style="display:flex; gap:0.25rem; align-items:center;">
-                                <button onclick="openEdit('/edit_user/{{u.id}}', 'Editar Usuário', [{label:'Nome Completo', name:'nome_completo', type:'text', value:'{{u.nome_completo}}', required:true}, {label:'Username', name:'username', type:'text', value:'{{u.username}}', required:true}, {label:'Perfil', name:'perfil', type:'select', value:'{{u.perfil}}', options:[{value:'admin',text:'Administrador'},{value:'tecnico',text:'Técnico'},{value:'protecao',text:'Protecção'}]}, {label:'Setor', name:'setor_id', type:'select', value:'{{u.setor_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for s in setores %}{value:'{{s.id}}',text:'{{s.nome}}'},{% endfor %}]}, {label:'Nova Senha (Opcional)', name:'password', type:'password', value:'', required:false}])" class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem">Editar</button>
+                                <button onclick="openEdit('/edit_user/{{u.id}}', 'Editar Usuário', [{label:'Nome Completo', name:'nome_completo', type:'text', value:'{{u.nome_completo}}', required:true}, {label:'Username', name:'username', type:'text', value:'{{u.username}}', required:true}, {label:'Perfil', name:'perfil', type:'select', value:'{{u.perfil}}', options:[{value:'admin',text:'Administrador'},{value:'tecnico',text:'Técnico'},{value:'protecao',text:'Protecção'}]}, {label:'Setor', name:'setor_id', type:'select', value:'{{u.setor_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for s in setores %}{value:'{{s.id}}',text:'{{s.nome}}'},{% endfor %}]}, {label:'Local Eleitoral', name:'eleitoral_local_id', type:'select', value:'{{u.eleitoral_local_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for l in eleitoral_locais %}{value:'{{l.id}}',text:'{{l.tipo}} - {{l.nome}}'},{% endfor %}]}, {label:'Nova Senha (Opcional)', name:'password', type:'password', value:'', required:false}])" class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem">Editar</button>
                                 <form method="POST" action="/delete_user/{{u.id}}" style="display:inline;" onsubmit="return confirm('Tem certeza que deseja remover este usuário?');">
                                     <button class="btn btn-danger" style="padding:0.2rem 0.5rem; font-size:0.8rem">Remover</button>
                                 </form>
@@ -1930,7 +1935,7 @@ def login():
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            c.execute("SELECT perfil, nome_completo, setor_id FROM users WHERE username=? AND password=?", (u, p))
+            c.execute("SELECT perfil, nome_completo, setor_id, eleitoral_local_id FROM users WHERE username=? AND password=?", (u, p))
             res = c.fetchone()
             conn.close()
             if res:
@@ -1938,6 +1943,7 @@ def login():
                 session['perfil'] = res[0]
                 session['nome_completo'] = res[1] or u
                 session['setor_id'] = res[2]
+                session['eleitoral_local_id'] = res[3]
                 return redirect(url_for('index'))
             else:
                 error_msg = f"<p style='color:red;'>Credenciais inválidas! BD: {'Nuvem' if is_cloud_mode() else 'Local'}<br>User digitado: '{u}'<br>Hash gerado: {p}</p>"
@@ -2338,8 +2344,8 @@ def cadastros():
     setores = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome, cargo, setor_id FROM funcionarios")
     funcs = [{'id':r[0], 'nome':r[1], 'cargo':r[2], 'setor_id':r[3]} for r in c.fetchall()]
-    c.execute("SELECT id, username, perfil, nome_completo, setor_id FROM users")
-    users_data = [{'id':r[0], 'username':r[1], 'perfil':r[2], 'nome_completo':r[3] or r[1], 'setor_id':r[4]} for r in c.fetchall()]
+    c.execute("SELECT id, username, perfil, nome_completo, setor_id, eleitoral_local_id FROM users")
+    users_data = [{'id':r[0], 'username':r[1], 'perfil':r[2], 'nome_completo':r[3] or r[1], 'setor_id':r[4], 'eleitoral_local_id': r[5]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM marcas")
     marcas = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM tipos_equipamento")
@@ -2350,8 +2356,13 @@ def cadastros():
     fornecedores = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM instituicoes")
     instituicoes = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
+    
+    # Eleitoral locais
+    c.execute("SELECT id, tipo, nome FROM eleitoral_local_armazenamento WHERE activo=1")
+    eleitoral_locais = [{'id':r[0], 'tipo':r[1], 'nome':r[2]} for r in c.fetchall()]
+    
     conn.close()
-    return render_template_string(CADASTROS_TEMPLATE, setores=setores, funcionarios=funcs, users_list=users_data, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, msg=request.args.get('msg'))
+    return render_template_string(CADASTROS_TEMPLATE, setores=setores, funcionarios=funcs, users_list=users_data, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, eleitoral_locais=eleitoral_locais, msg=request.args.get('msg'))
 
 
 
@@ -2462,7 +2473,9 @@ def add_user():
     try:
         setor_val = request.form.get('setor_id')
         setor_val = int(setor_val) if (setor_val and setor_val != '' and setor_val != 'None') else None
-        c.execute("INSERT INTO users (username, password, perfil, nome_completo, setor_id) VALUES (?,?,?,?,?)", (request.form['username'], pwd, request.form['perfil'], request.form.get('nome_completo'), setor_val))
+        eleitoral_local_val = request.form.get('eleitoral_local_id')
+        eleitoral_local_val = int(eleitoral_local_val) if (eleitoral_local_val and eleitoral_local_val != '' and eleitoral_local_val != 'None') else None
+        c.execute("INSERT INTO users (username, password, perfil, nome_completo, setor_id, eleitoral_local_id) VALUES (?,?,?,?,?,?)", (request.form['username'], pwd, request.form['perfil'], request.form.get('nome_completo'), setor_val, eleitoral_local_val))
         conn.commit()
         msg = "Usuário adicionado com sucesso!"
     except:
@@ -2498,11 +2511,13 @@ def edit_user(id):
     pwd = request.form.get('password')
     setor_id = request.form.get('setor_id')
     setor_val = int(setor_id) if (setor_id and setor_id != '' and setor_id != 'None') else None
+    eleitoral_local_id = request.form.get('eleitoral_local_id')
+    eleitoral_local_val = int(eleitoral_local_id) if (eleitoral_local_id and eleitoral_local_id != '' and eleitoral_local_id != 'None') else None
     if pwd:
         hashed = hashlib.md5(pwd.encode()).hexdigest()
-        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, password=?, setor_id=? WHERE id=?", (nome_completo, username, perfil, hashed, setor_val, id))
+        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, password=?, setor_id=?, eleitoral_local_id=? WHERE id=?", (nome_completo, username, perfil, hashed, setor_val, eleitoral_local_val, id))
     else:
-        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, setor_id=? WHERE id=?", (nome_completo, username, perfil, setor_val, id))
+        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, setor_id=?, eleitoral_local_id=? WHERE id=?", (nome_completo, username, perfil, setor_val, eleitoral_local_val, id))
     conn.commit()
     conn.close()
     return redirect(url_for('cadastros', msg="Utilizador atualizado!"))
@@ -3981,6 +3996,8 @@ def sync_databases():
         s_conn.close()
 
 init_db()
+from routes_eleitoral import eleitoral_bp
+app.register_blueprint(eleitoral_bp)
 
 if __name__ == '__main__':
     # Executa a sincronização inteligente apenas se estiver em modo local
@@ -3989,5 +4006,5 @@ if __name__ == '__main__':
         run_startup_sync()
         
     Timer(1.5, lambda: webbrowser.open('http://127.0.0.1:5000')).start()
-    app.run(host='127.0.0.1', port=5000)
+    app.run(host='127.0.0.1', port=5000, debug=True)
 

@@ -1,0 +1,83 @@
+{% extends "eleitoral/base.html" %}
+
+{% block content %}
+<div class="header-actions">
+    <h2>Catálogos do Sistema Eleitoral</h2>
+</div>
+
+<div style="display:flex; gap: 1rem;">
+    <!-- Coluna 1: Províncias e Países -->
+    <div style="flex:1;">
+        <div class="card">
+            <h3>Províncias</h3>
+            <table>
+                <thead>
+                    <tr><th>Código</th><th>Nome</th></tr>
+                </thead>
+                <tbody>
+                    {% for p in provincias %}
+                    <tr>
+                        <td>{{ p.codigo }}</td>
+                        <td>{{ p.nome }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h3>Países da Diáspora</h3>
+            <table>
+                <thead>
+                    <tr><th>Código</th><th>Nome</th><th>Continente</th></tr>
+                </thead>
+                <tbody>
+                    {% for p in paises %}
+                    <tr>
+                        <td>{{ p.codigo_iso or '-' }}</td>
+                        <td>{{ p.nome }}</td>
+                        <td>{{ p.continente }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Coluna 2: Tipos de Material -->
+    <div style="flex:2;">
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3>Tipos de Material</h3>
+                <button class="btn btn-blue" onclick="alert('Funcionalidade de adicionar em desenvolvimento')">+ Novo Tipo</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Variante</th>
+                        <th>Unidade</th>
+                        <th>Rastreia Estado?</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in tipos %}
+                    <tr>
+                        <td>{{ t.nome }}</td>
+                        <td>{{ t.variante or '-' }}</td>
+                        <td>{{ t.unidade_medida }}</td>
+                        <td>
+                            {% if t.controla_estado == 1 %}
+                                <span style="background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">Sim (Bom/Mau)</span>
+                            {% else %}
+                                <span style="background: #e2e8f0; color: #475569; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">Não</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

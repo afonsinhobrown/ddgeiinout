@@ -1,0 +1,197 @@
+{% extends "eleitoral/base.html" %}
+
+{% block content %}
+<div class="header-actions" style="justify-content: space-between; align-items: center;">
+    <h2>Processos Eleitorais</h2>
+    <button onclick="document.getElementById('modal-novo-processo').style.display='block'" class="btn btn-blue">Novo Processo</button>
+</div>
+
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>Nome</th>
+                <th>Tipo</th>
+                <th>Ano</th>
+                <th>Período</th>
+                <th>Estado</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in processos %}
+            <tr>
+                <td><strong>{{ p.nome }}</strong></td>
+                <td>{{ p.tipo }}</td>
+                <td>{{ p.ano }}</td>
+                <td>{{ p.data_inicio or '-' }} até {{ p.data_fim or '-' }}</td>
+                <td>
+                    {% if p.estado == 'PLANEADO' %}
+                        <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">Planeado</span>
+                    {% elif p.estado == 'EM_CURSO' %}
+                        <span style="background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">Em Curso</span>
+                    {% else %}
+                        <span style="background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">Encerrado</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if p.estado == 'EM_CURSO' %}
+                    <form action="{{ url_for('eleitoral.encerrar_processo', id=p.id) }}" method="POST" onsubmit="return confirm('ATENÇÃO: Deseja encerrar este processo e transferir os sobrantes para o próximo?');">
+                        <input type="hidden" name="destino_id" value="" id="destino_{{ p.id }}">
+                        <button type="button" class="btn btn-outline" style="font-size:0.8rem; padding: 0.3rem 0.6rem;" onclick="prepararFecho({{ p.id }})">Fechar e Transferir &rarr;</button>
+                        <button type="submit" id="btn_fecho_{{ p.id }}" style="display:none;"></button>
+                    </form>
+                    {% elif p.estado == 'PLANEADO' %}
+                    <form action="{{ url_for('eleitoral.iniciar_processo', id=p.id) }}" method="POST">
+                        <button type="submit" class="btn btn-blue" style="font-size:0.8rem; padding: 0.3rem 0.6rem;">Iniciar</button>
+                    </form>
+                    {% endif %}
+                    <button type="button" class="btn btn-outline" style="font-size:0.8rem; padding: 0.3rem 0.6rem; margin-top: 5px;" onclick="document.getElementById('modal-novo-evento').style.display='block'; document.getElementById('evento_processo_id').value='{{ p.id }}';">+ Evento (Recenseamento/Votação)</button>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="6" style="text-align: center;">Nenhum processo registado.</td>
+            </tr>
+            
+            {% if p.eventos %}
+            <tr style="background:#f8fafc;">
+                <td colspan="6" style="padding: 1rem 2rem;">
+                    <div style="font-size: 0.9rem; margin-bottom: 0.5rem; color: #475569;"><strong>Eventos Logísticos do Processo:</strong></div>
+                    <table style="width: 100%; border: 1px solid #e2e8f0; border-radius: 4px;">
+                        <thead>
+                            <tr style="background: #f1f5f9;">
+                                <th>Tipo</th>
+                                <th>Nome</th>
+                                <th>Período</th>
+                                <th>Estado</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for e in p.eventos %}
+                            <tr>
+                                <td>{{ e.tipo }}</td>
+                                <td>{{ e.nome }}</td>
+                                <td>{{ e.data_inicio or '-' }} até {{ e.data_fim or '-' }}</td>
+                                <td>
+                                    {% if e.estado == 'PLANEADO' %}
+                                        <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">Planeado</span>
+                                    {% elif e.estado == 'ACTIVO' %}
+                                        <span style="background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; font-weight:bold;">Em Logística Activa</span>
+                                    {% else %}
+                                        <span style="background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">Concluído</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if e.estado == 'PLANEADO' %}
+                                    <form action="{{ url_for('eleitoral.update_estado_evento', id=e.id) }}" method="POST" style="display:inline;">
+                                        <input type="hidden" name="estado" value="ACTIVO">
+                                        <button type="submit" class="btn btn-blue" style="font-size:0.8rem; padding: 0.2rem 0.5rem;">Iniciar Evento</button>
+                                    </form>
+                                    {% elif e.estado == 'ACTIVO' %}
+                                    <form action="{{ url_for('eleitoral.update_estado_evento', id=e.id) }}" method="POST" style="display:inline;" onsubmit="return confirm('Deseja encerrar este evento? Os materiais voltarão a ser considerados Sobrantes.');">
+                                        <input type="hidden" name="estado" value="CONCLUIDO">
+                                        <button type="submit" class="btn btn-outline" style="font-size:0.8rem; padding: 0.2rem 0.5rem; color:#991b1b; border-color:#991b1b;">Encerrar Evento</button>
+                                    </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </td>
+            </tr>
+            {% endif %}
+            
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Modal Novo Processo -->
+<div id="modal-novo-processo" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
+    <div style="background:white; max-width:500px; margin: 100px auto; padding: 2rem; border-radius:8px;">
+        <h3>Registar Novo Processo</h3>
+        <form action="{{ url_for('eleitoral.processos') }}" method="POST">
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Nome (ex: Eleições Gerais 2024)</label>
+                <input type="text" name="nome" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Tipo</label>
+                <select name="tipo" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                    <option value="Presidenciais">Presidenciais</option>
+                    <option value="Legislativas">Legislativas</option>
+                    <option value="Autárquicas">Autárquicas</option>
+                    <option value="Recenseamento">Recenseamento</option>
+                </select>
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Ano</label>
+                <input type="number" name="ano" required value="2024" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div style="display:flex; gap: 1rem; margin-bottom: 1rem;">
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Data Início</label>
+                    <input type="date" name="data_inicio" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Data Fim</label>
+                    <input type="date" name="data_fim" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                </div>
+            </div>
+            <div style="text-align: right; margin-top: 2rem;">
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-novo-processo').style.display='none'">Cancelar</button>
+                <button type="submit" class="btn btn-blue">Registar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function prepararFecho(idOrigem) {
+    var destino = prompt("Indique o ID do processo destino (para onde transitam os sobrantes):");
+    if (destino != null && destino.trim() !== "") {
+        document.getElementById('destino_' + idOrigem).value = destino;
+        document.getElementById('btn_fecho_' + idOrigem).click();
+    }
+}
+</script>
+<!-- Modal para Novo Evento -->
+<div id="modal-novo-evento" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:2rem; border-radius:8px; width:400px; max-width:90%;">
+        <h3 style="margin-top:0;">Criar Novo Evento</h3>
+        <p style="font-size:0.9rem; color:#64748b;">Um evento marca o período em que o material passa de "Sobrante" para "Logística Activa".</p>
+        <form method="POST" action="{{ url_for('eleitoral.add_evento') }}">
+            <input type="hidden" name="processo_id" id="evento_processo_id" value="">
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Tipo de Evento</label>
+                <select name="tipo" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                    <option value="RECENSEAMENTO">Recenseamento</option>
+                    <option value="VOTACAO">Votação</option>
+                </select>
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Nome (Ex: Recenseamento 2024)</label>
+                <input type="text" name="nome" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div style="display:flex; gap: 1rem; margin-bottom: 1rem;">
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Início</label>
+                    <input type="date" name="data_inicio" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Fim</label>
+                    <input type="date" name="data_fim" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                </div>
+            </div>
+            <div style="text-align: right; margin-top: 2rem;">
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-novo-evento').style.display='none'">Cancelar</button>
+                <button type="submit" class="btn btn-blue">Criar Evento</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}

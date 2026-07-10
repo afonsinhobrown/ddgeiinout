@@ -1,0 +1,88 @@
+{% extends 'eleitoral/base.html' %}
+
+{% block content %}
+<div class="card" style="max-width: 800px; margin: 0 auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem;">
+        <h2>🚚 Emitir Guia de Marcha / Distribuição</h2>
+        <a href="{{ url_for('eleitoral.distribuicao') }}" class="btn btn-outline">Cancelar</a>
+    </div>
+
+    <form action="{{ url_for('eleitoral.nova_guia') }}" method="POST">
+        <input type="hidden" name="processo_id" value="{{ processo_ativo.id }}">
+        
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
+            <div>
+                <label style="display:block; font-weight:bold; margin-bottom:0.5rem;">Local de Origem</label>
+                <select name="local_origem_id" class="btn btn-outline" style="width:100%; text-align:left; background:#fff;" required>
+                    <option value="">-- Selecione a Origem --</option>
+                    {% for l in locais %}
+                    <option value="{{ l.id }}">{{ l.tipo }} - {{ l.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label style="display:block; font-weight:bold; margin-bottom:0.5rem;">Local de Destino (Brigada/Província)</label>
+                <select name="local_destino_id" class="btn btn-outline" style="width:100%; text-align:left; background:#fff;" required>
+                    <option value="">-- Selecione o Destino --</option>
+                    {% for l in locais %}
+                    <option value="{{ l.id }}">{{ l.tipo }} - {{ l.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
+            <label style="display:block; font-weight:bold; margin-bottom:0.5rem;">Observações / Detalhes do Transporte</label>
+            <input type="text" name="observacoes" class="btn btn-outline" style="width:100%; text-align:left; background:#fff;" placeholder="Matrícula do camião, nome do motorista, etc.">
+        </div>
+
+        <h3 style="margin-bottom: 1rem; border-bottom:1px solid #e2e8f0; padding-bottom:0.5rem;">Materiais a Transferir</h3>
+        
+        <div id="itensContainer">
+            <div class="item-row" style="display:flex; gap: 1rem; align-items:flex-end; margin-bottom: 1rem;">
+                <div style="flex:2;">
+                    <label style="font-size:0.8rem; color:#64748b;">Material</label>
+                    <select name="item_tipo_material_id[]" class="btn btn-outline" style="width:100%; text-align:left; background:#fff;" required>
+                        <option value="">-- Selecione --</option>
+                        {% for t in tipos_material %}
+                        <option value="{{ t.id }}">{{ t.nome }} {{ ' ('~t.variante~')' if t.variante else '' }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div style="flex:1;">
+                    <label style="font-size:0.8rem; color:#64748b;">Qtd. Bom</label>
+                    <input type="number" step="0.01" name="item_quantidade_bom[]" class="btn btn-outline" style="width:100%; text-align:left; background:#fff;" required>
+                </div>
+                <div style="flex:1;">
+                    <label style="font-size:0.8rem; color:#64748b;">Qtd. Mau</label>
+                    <input type="number" step="0.01" value="0" name="item_quantidade_mau[]" class="btn btn-outline" style="width:100%; text-align:left; background:#fff;" required>
+                </div>
+                <div style="flex:0;">
+                    <button type="button" class="btn btn-outline" style="color:#ef4444;" onclick="this.parentElement.parentElement.remove()">X</button>
+                </div>
+            </div>
+        </div>
+        
+        <button type="button" onclick="adicionarLinha()" class="btn btn-outline" style="margin-bottom: 2rem;">➕ Adicionar outro material</button>
+
+        <div style="text-align:right;">
+            <button type="submit" class="btn btn-blue" style="font-size: 1.1rem; padding: 0.8rem 2rem;">Emitir Guia</button>
+        </div>
+    </form>
+</div>
+
+<script>
+    function adicionarLinha() {
+        const container = document.getElementById('itensContainer');
+        const firstRow = container.querySelector('.item-row');
+        const newRow = firstRow.cloneNode(true);
+        // Clear values
+        newRow.querySelectorAll('input').forEach(i => {
+            if(i.name.includes('bom')) i.value = '';
+            if(i.name.includes('mau')) i.value = '0';
+        });
+        newRow.querySelector('select').value = '';
+        container.appendChild(newRow);
+    }
+</script>
+{% endblock %}

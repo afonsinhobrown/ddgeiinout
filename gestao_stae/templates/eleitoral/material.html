@@ -1,0 +1,221 @@
+{% extends "eleitoral/base.html" %}
+
+{% block content %}
+<div class="header-actions" style="justify-content: space-between;">
+    <h2>Registo de Material Sobrante</h2>
+    <div>
+        <button class="btn btn-outline" onclick="exportarPDF()">📄 Exportar PDF</button>
+        <button class="btn btn-outline" onclick="document.getElementById('modal-importar').style.display='block'">📤 Importar Excel/Word</button>
+        <button class="btn btn-blue" onclick="document.getElementById('modal-novo-material').style.display='block'">+ Registar Material</button>
+    </div>
+</div>
+
+<div class="card">
+    <form method="GET" action="{{ url_for('eleitoral.material') }}" style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e2e8f0; display:flex; gap: 1rem; align-items:flex-end;">
+        <div style="flex:1;">
+            <label style="display:block; font-size:0.8rem; color:#64748b; margin-bottom:0.2rem;">Processo em Foco:</label>
+            <select name="processo_id" required class="btn btn-outline" style="width:100%; padding:0.5rem; text-align:left; background:#f8fafc;">
+                <option value="">-- Selecione o Processo --</option>
+                {% for p in processos %}
+                <option value="{{ p.id }}" {% if p.id|string == processo_id|string %}selected{% endif %}>{{ p.nome }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="flex:1;">
+            <label style="display:block; font-size:0.8rem; color:#64748b; margin-bottom:0.2rem;">Local de Armazenamento:</label>
+            <select name="local_id" class="btn btn-outline" style="width:100%; padding:0.5rem; text-align:left; background:#f8fafc;">
+                <option value="">Selecione o Local...</option>
+                
+                <optgroup label="Províncias">
+                {% for loc in locais['PROVINCIA'] %}
+                    <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
+                {% endfor %}
+                </optgroup>
+                
+                <optgroup label="Países da Diáspora">
+                {% for loc in locais['PAIS_DIASPORA'] %}
+                    <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
+                {% endfor %}
+                </optgroup>
+                
+                <optgroup label="Central">
+                {% for loc in locais['CENTRAL'] %}
+                    <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
+                {% endfor %}
+                </optgroup>
+            </select>
+        </div>
+        <div style="flex:1;">
+            <label style="display:block; font-size:0.8rem; color:#64748b; margin-bottom:0.2rem;">Tipo de Material:</label>
+            <select name="tipo_material_id" multiple class="btn btn-outline" style="width:100%; padding:0.5rem; text-align:left; background:#f8fafc; height:40px;">
+                <option value="">Todos os Tipos...</option>
+                {% for t in tipos_material %}
+                <option value="{{ t.id }}" {% if t.id|string in tipo_material_id %}selected{% endif %}>{{ t.nome }} {% if t.variante %}({{ t.variante }}){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <button type="submit" class="btn btn-blue">Ver Sobrantes</button>
+        </div>
+    </form>
+
+    <div id="area-tabela">
+        <table id="tabela-materiais">
+        <thead>
+            <tr>
+                <th>Tipo de Material</th>
+                <th>Variante</th>
+                <th>Local</th>
+                <th>Total</th>
+                <th>Bom</th>
+                <th>Mau</th>
+                <th>Origem</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if materiais %}
+                {% for m in materiais %}
+                <tr>
+                    <td><strong>{{ m.tipo_nome }}</strong></td>
+                    <td>{{ m.tipo_variante or '-' }}</td>
+                    <td><span style="font-size:0.85rem; color:#475569;">{{ m.local_nome }}</span></td>
+                    <td>{{ m.quantidade_total }}</td>
+                    <td><span style="color: #166534;">{{ m.quantidade_bom }}</span></td>
+                    <td><span style="color: #991b1b;">{{ m.quantidade_mau }}</span></td>
+                    <td>{{ m.origem }}</td>
+                    <td>
+                        <button class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem;">Editar</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="8" style="text-align: center; color: #64748b; padding: 2rem 0;">Nenhum material encontrado. Selecione um processo e clique em "Ver Sobrantes".</td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<!-- Modal Registar Material -->
+<div id="modal-novo-material" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
+    <div style="background:white; max-width:500px; margin: 100px auto; padding: 2rem; border-radius:8px;">
+        <h3>Registar Material no Processo</h3>
+        <form onsubmit="event.preventDefault(); alert('Gravação em desenvolvimento'); document.getElementById('modal-novo-material').style.display='none';">
+            <div style="display:flex; gap: 1rem; margin-bottom: 1rem;">
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Processo Eleitoral</label>
+                    <select name="modal_processo_id" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                        <option value="">-- Selecione --</option>
+                        {% for p in processos %}
+                        <option value="{{ p.id }}" {% if p.id|string == processo_id|string %}selected{% endif %}>{{ p.nome }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Local de Armazenamento</label>
+                    <select name="modal_local_id" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                        <option value="">-- Selecione --</option>
+                        <optgroup label="Províncias">
+                        {% for loc in locais['PROVINCIA'] %}
+                            <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
+                        {% endfor %}
+                        </optgroup>
+                        <optgroup label="Países da Diáspora">
+                        {% for loc in locais['PAIS_DIASPORA'] %}
+                            <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
+                        {% endfor %}
+                        </optgroup>
+                        <optgroup label="Central">
+                        {% for loc in locais['CENTRAL'] %}
+                            <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
+                        {% endfor %}
+                        </optgroup>
+                    </select>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Material</label>
+                <select required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                    <option value="">-- Escolha --</option>
+                    {% for t in tipos_material %}
+                    <option value="{{ t.id }}">{{ t.nome }} {% if t.variante %}({{ t.variante }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div style="display:flex; gap: 1rem; margin-bottom: 1rem;">
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Qtd Total</label>
+                    <input type="number" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Bom</label>
+                    <input type="number" value="0" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Mau</label>
+                    <input type="number" value="0" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                </div>
+            </div>
+
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Observações</label>
+                <input type="text" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+            </div>
+
+            <div style="text-align: right; margin-top: 2rem;">
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-novo-material').style.display='none'">Cancelar</button>
+                <button type="submit" class="btn btn-blue">Adicionar/Somar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal para Importar Ficheiro -->
+<div id="modal-importar" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:2rem; border-radius:8px; width:400px; max-width:90%;">
+        <h3 style="margin-top:0;">Importar Sobrantes (Word/Excel)</h3>
+        <p style="font-size:0.9rem; color:#64748b;">Faça o upload do documento com as tabelas de sobrantes.</p>
+        <form method="POST" action="{{ url_for('eleitoral.importacao_excel') }}" enctype="multipart/form-data">
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Processo Eleitoral</label>
+                <select name="processo_id" required class="btn btn-outline" style="width:100%; padding:0.5rem; text-align:left;">
+                    {% for p in processos %}
+                    <option value="{{ p.id }}">{{ p.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Ficheiro (.docx)</label>
+                <input type="file" name="file" accept=".docx" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div style="text-align: right; margin-top: 2rem;">
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-importar').style.display='none'">Cancelar</button>
+                <button type="submit" class="btn btn-blue">Importar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script>
+function exportarPDF() {
+    var element = document.getElementById('area-tabela');
+    var opt = {
+      margin:       0.5,
+      filename:     'materiais.pdf',
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2 },
+      jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' }
+    };
+    html2pdf().set(opt).from(element).save();
+}
+</script>
+{% endblock %}

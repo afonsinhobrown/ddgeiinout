@@ -1,0 +1,222 @@
+{% extends "eleitoral/base.html" %}
+
+{% block content %}
+<div class="header-actions" style="justify-content: space-between;">
+    <h2>Resumo de Sobrantes</h2>
+    <form method="GET" action="{{ url_for('eleitoral.dashboard') }}" style="display:flex; gap:0.5rem; align-items:center;">
+        <select name="processo_id" class="btn btn-outline" style="padding:0.5rem; background:white;">
+            <option value="">Todos os Processos</option>
+            {% for p in processos %}
+            <option value="{{ p.id }}" {% if request.args.get('processo_id')|string == p.id|string %}selected{% endif %}>{{ p.nome }} ({{ p.ano }})</option>
+            {% endfor %}
+        </select>
+        
+        <details style="position:relative; background:white; padding:0.5rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; min-width: 250px;">
+            <summary style="outline:none; font-weight:500; color:#334155; user-select:none;">Selecionar Materiais... ▼</summary>
+            <div style="position:absolute; top:calc(100% + 2px); left:0; width:350px; max-height:250px; overflow-y:auto; background:white; border:1px solid #cbd5e1; border-radius:4px; box-shadow: 0 4px 10px rgba(0,0,0,0.15); padding:0.5rem; z-index:100;">
+                <div style="font-size:0.8rem; color:#64748b; margin-bottom:0.5rem; border-bottom:1px solid #e2e8f0; padding-bottom:0.25rem;">Marque os materiais que deseja filtrar:</div>
+                {% for t in tipos_material %}
+                <label style="display:flex; align-items:flex-start; padding:0.35rem 0.25rem; font-size:0.9rem; cursor:pointer; border-radius:4px;">
+                    <input type="checkbox" name="tipo_material_id" value="{{ t.id }}" {% if t.id|string in tipo_material_id %}checked{% endif %} style="margin-right:0.5rem; margin-top:0.2rem; cursor:pointer;">
+                    <span>{{ t.nome }} {% if t.variante %}<span style="color:#64748b;">({{ t.variante }})</span>{% endif %}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </details>
+
+        <button type="submit" class="btn btn-blue">Filtrar</button>
+    </form>
+</div>
+
+<div style="display: flex; gap: 1rem; margin-bottom: 2rem;">
+    <div class="card" style="flex:1; text-align:center;">
+        <h3 style="margin-bottom:0.5rem; color:#475569;">Total Material Sobrante</h3>
+        <p style="font-size:2rem; font-weight:bold; margin:0; color:#1e293b;">{{ "%.2f"|format(resumo.total|default(0)) }}</p>
+    </div>
+    <div class="card" style="flex:1; text-align:center;">
+        <h3 style="margin-bottom:0.5rem; color:#166534;">Material em Bom Estado</h3>
+        <p style="font-size:2rem; font-weight:bold; margin:0; color:#22c55e;">{{ "%.2f"|format(resumo.bom|default(0)) }}</p>
+    </div>
+    <div class="card" style="flex:1; text-align:center;">
+        <h3 style="margin-bottom:0.5rem; color:#991b1b;">Material em Mau Estado</h3>
+        <p style="font-size:2rem; font-weight:bold; margin:0; color:#ef4444;">{{ "%.2f"|format(resumo.mau|default(0)) }}</p>
+    </div>
+</div>
+
+<div style="display: flex; gap: 1rem;">
+    <div class="card" style="flex: 2;">
+        <h3>Distribuição por Categoria</h3>
+        <canvas id="graficoCategoria"></canvas>
+    </div>
+    <div class="card" style="flex: 1;">
+        <h3>Estado de Conservação</h3>
+        <canvas id="graficoEstado"></canvas>
+    </div>
+</div>
+
+<div class="card" style="margin-top: 1rem; position: relative;">
+    <h3>Distribuição por Província (Mapa Interativo)</h3>
+    
+    <div style="display:flex; flex-direction:column; gap:2rem;">
+        <div id="mozMap" style="display: grid; grid-template-areas: 
+            '. niassa cd .'
+            '. tete nampula .'
+            '. zambezia . .'
+            '. manica sofala .'
+            '. gaza inhambane .'
+            '. maputo maputoc .';
+            gap: 10px; justify-content: center; padding: 2rem; background: #f8fafc; border-radius: 8px;">
+            
+            <div id="prov_Niassa" class="map-prov" style="grid-area: niassa;">Niassa</div>
+            <div id="prov_Cabo Delgado" class="map-prov" style="grid-area: cd;">Cabo Delgado</div>
+            <div id="prov_Nampula" class="map-prov" style="grid-area: nampula;">Nampula</div>
+            <div id="prov_Tete" class="map-prov" style="grid-area: tete;">Tete</div>
+            <div id="prov_Zambezia" class="map-prov" style="grid-area: zambezia;">Zambézia</div>
+            <div id="prov_Manica" class="map-prov" style="grid-area: manica;">Manica</div>
+            <div id="prov_Sofala" class="map-prov" style="grid-area: sofala;">Sofala</div>
+            <div id="prov_Inhambane" class="map-prov" style="grid-area: inhambane;">Inhambane</div>
+            <div id="prov_Gaza" class="map-prov" style="grid-area: gaza;">Gaza</div>
+            <div id="prov_Maputo" class="map-prov" style="grid-area: maputo;">Maputo Prov.</div>
+            <div id="prov_Maputo (Cidade)" class="map-prov" style="grid-area: maputoc;">Maputo Cid.</div>
+        </div>
+        
+        <canvas id="graficoProvincia" style="max-height: 250px;"></canvas>
+    </div>
+    
+    <div id="mapTooltip" style="display:none; position:absolute; background:white; border:1px solid #cbd5e1; box-shadow:0 4px 10px rgba(0,0,0,0.2); padding:1rem; border-radius:8px; z-index:100; min-width: 200px; pointer-events:none;">
+        <h4 id="ttProvName" style="margin-top:0; border-bottom:1px solid #e2e8f0; padding-bottom:0.5rem;">Província</h4>
+        <div id="ttContent" style="font-size:0.9rem; margin-top:0.5rem;"></div>
+    </div>
+</div>
+
+<style>
+    .map-prov {
+        background: #e2e8f0;
+        border: 2px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 1.5rem;
+        text-align: center;
+        font-weight: bold;
+        color: #475569;
+        cursor: pointer;
+        transition: all 0.2s;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .map-prov:hover {
+        transform: scale(1.05);
+        background: #bfdbfe;
+        border-color: #3b82f6;
+        color: #1d4ed8;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .map-prov.has-data {
+        background: #c7d2fe;
+        border-color: #6366f1;
+        color: #3730a3;
+    }
+    .map-prov.has-data:hover {
+        background: #a5b4fc;
+    }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const dataEstado = {
+        labels: ['Bom Estado', 'Mau Estado'],
+        datasets: [{
+            data: [{{ resumo.bom|default(0) }}, {{ resumo.mau|default(0) }}],
+            backgroundColor: ['#22c55e', '#ef4444'],
+            hoverOffset: 4
+        }]
+    };
+    new Chart(document.getElementById('graficoEstado'), {
+        type: 'pie',
+        data: dataEstado
+    });
+
+    const categorias = {{ categorias_labels | tojson }};
+    const categoriasData = {{ categorias_data | tojson }};
+    
+    new Chart(document.getElementById('graficoCategoria'), {
+        type: 'bar',
+        data: {
+            labels: categorias,
+            datasets: [{
+                label: 'Quantidade Total',
+                data: categoriasData,
+                backgroundColor: '#3b82f6'
+            }]
+        },
+        options: {
+            scales: {
+                y: { beginAtZero: true }
+            }
+        }
+    });
+
+    const provincias = {{ provincias_labels | tojson }};
+    const datasetsProv = {{ datasets_provincia | tojson }};
+    
+    new Chart(document.getElementById('graficoProvincia'), {
+        type: 'bar',
+        data: {
+            labels: provincias,
+            datasets: datasetsProv
+        },
+        options: {
+            scales: {
+                y: { beginAtZero: true }
+            }
+        }
+    });
+
+    // Map Interactive Logic
+    fetch('{{ url_for("eleitoral.api_mapa_distribuicao") }}')
+    .then(res => res.json())
+    .then(data => {
+        const tooltip = document.getElementById('mapTooltip');
+        const ttProvName = document.getElementById('ttProvName');
+        const ttContent = document.getElementById('ttContent');
+        
+        document.querySelectorAll('.map-prov').forEach(el => {
+            const provName = el.id.replace('prov_', '');
+            
+            // Check if province has data
+            if (data[provName] && Object.keys(data[provName]).length > 0) {
+                el.classList.add('has-data');
+                
+                el.addEventListener('mousemove', (e) => {
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = (e.pageX + 15) + 'px';
+                    tooltip.style.top = (e.pageY + 15) + 'px';
+                    
+                    ttProvName.innerText = provName;
+                    
+                    let html = '<table style="width:100%;">';
+                    for (const [mat, qty] of Object.entries(data[provName])) {
+                        html += `<tr><td>${mat}</td><td style="text-align:right; font-weight:bold; padding-left:1rem;">${qty}</td></tr>`;
+                    }
+                    html += '</table>';
+                    ttContent.innerHTML = html;
+                });
+                
+                el.addEventListener('mouseout', () => {
+                    tooltip.style.display = 'none';
+                });
+            } else {
+                el.addEventListener('mousemove', (e) => {
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = (e.pageX + 15) + 'px';
+                    tooltip.style.top = (e.pageY + 15) + 'px';
+                    ttProvName.innerText = provName;
+                    ttContent.innerHTML = '<span style="color:#94a3b8;">Sem material alocado</span>';
+                });
+                el.addEventListener('mouseout', () => {
+                    tooltip.style.display = 'none';
+                });
+            }
+        });
+    });
+
+</script>
+{% endblock %}
