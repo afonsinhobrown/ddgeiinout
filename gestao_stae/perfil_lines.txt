@@ -1,0 +1,30 @@
+            old.execute("SELECT id, username, password, perfil FROM users")
+            new.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, perfil TEXT, nome_completo TEXT)''')
+                new.execute("INSERT OR IGNORE INTO users (id, username, password, perfil, nome_completo) VALUES (?,?,?,?,?)", (u[0], u[1], u[2], u[3], u[1]))
+            c.execute("UPDATE users SET setor_id = 1 WHERE perfil != 'admin' AND setor_id IS NULL")
+    c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, perfil TEXT, nome_completo TEXT)''')
+            c.execute("INSERT INTO users (username, password, perfil, nome_completo) VALUES (?,?,?,?)", (u, hashlib.md5(p.encode()).hexdigest(), perf, u))
+        <div>👤 {{session.nome}} ({{session.perfil}}) | <a href="/logout" style="color:white">Sair</a></div>
+            {% if session.perfil == 'admin' %}
+                    <select name="perfil" required>
+                        <option value="">Selecione o Perfil</option>
+                                <small style="color:#64748b;">{{u.username}} ({{u.perfil}})</small>
+                                <button onclick="openEdit('/edit_user/{{u.id}}', 'Editar Usuário', [{label:'Nome Completo', name:'nome_completo', type:'text', value:'{{u.nome_completo}}', required:true}, {label:'Username', name:'username', type:'text', value:'{{u.username}}', required:true}, {label:'Perfil', name:'perfil', type:'select', value:'{{u.perfil}}', options:[{value:'admin',text:'Administrador'},{value:'tecnico',text:'Técnico'},{value:'protecao',text:'Protecção'}]}, {label:'Setor', name:'setor_id', type:'select', value:'{{u.setor_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for s in setores %}{value:'{{s.id}}',text:'{{s.nome}}'},{% endfor %}]}, {label:'Local Eleitoral', name:'eleitoral_local_id', type:'select', value:'{{u.eleitoral_local_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for l in eleitoral_locais %}{value:'{{l.id}}',text:'{{l.tipo}} - {{l.nome}}'},{% endfor %}]}, {label:'Nova Senha (Opcional)', name:'password', type:'password', value:'', required:false}])" class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem">Editar</button>
+                    {% if session.perfil == 'admin' %}
+            c.execute("SELECT perfil, nome_completo, setor_id, eleitoral_local_id FROM users WHERE username=? AND password=?", (u, p))
+                session['perfil'] = res[0]
+        if session.get('perfil') != 'admin':
+    is_admin = session.get('perfil') == 'admin'
+    return render_template_string(MAIN_TEMPLATE, msg=msg, username=session['username'], perfil=session.get('perfil'), movimentos=movimentos, pendentes=pendentes, inv_items=inv_items, setores=setores, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, em_reparacao=em_reparacao)
+    is_admin = session.get('perfil') == 'admin'
+    c.execute("SELECT id, nome_completo, username FROM users WHERE perfil='protecao'")
+    c.execute("SELECT id, username, perfil, nome_completo, setor_id, eleitoral_local_id FROM users")
+    users_data = [{'id':r[0], 'username':r[1], 'perfil':r[2], 'nome_completo':r[3] or r[1], 'setor_id':r[4], 'eleitoral_local_id': r[5]} for r in c.fetchall()]
+        c.execute("INSERT INTO users (username, password, perfil, nome_completo, setor_id, eleitoral_local_id) VALUES (?,?,?,?,?,?)", (request.form['username'], pwd, request.form['perfil'], request.form.get('nome_completo'), setor_val, eleitoral_local_val))
+    perfil = request.form.get('perfil')
+        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, password=?, setor_id=?, eleitoral_local_id=? WHERE id=?", (nome_completo, username, perfil, hashed, setor_val, eleitoral_local_val, id))
+        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, setor_id=?, eleitoral_local_id=? WHERE id=?", (nome_completo, username, perfil, setor_val, eleitoral_local_val, id))
+    if session.get('perfil') != 'admin':
+    if 'username' not in session or session.get('perfil') != 'admin':
+    is_admin = session.get('perfil') == 'admin'
+            perfil VARCHAR, 

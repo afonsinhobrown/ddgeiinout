@@ -350,6 +350,22 @@ COMMON_HEAD = '''
         input, select, textarea { width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.5rem; margin-top: 0.5rem; }
         .hidden { display: none; }
     </style>
+    <script>
+        function syncManual() {
+            if(!confirm("Deseja forçar a sincronização com a Nuvem agora?")) return;
+            fetch('/api/sync', {method: 'POST'})
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) {
+                    alert("Sincronização concluída com sucesso!");
+                    window.location.reload();
+                } else {
+                    alert("Erro na sincronização: " + data.error);
+                }
+            })
+            .catch(e => alert("Erro ao contactar servidor de sincronização."));
+        }
+    </script>
 '''
 
 LOGIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<title>Login - STAE</title></head>
@@ -372,9 +388,11 @@ RELATORIOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD 
 <body>
     <div class="nav">
         <strong>STAE RELATÓRIOS E ESTATÍSTICAS</strong>
-        <div>
-            <a href="/" class="btn btn-outline" style="background:white; color:#0f172a; margin-right:1rem">⬅️ Voltar ao Início</a>
-            <a href="/relatorio_pdf" target="_blank" class="btn btn-blue">📄 Imprimir Relatório Geral PDF</a>
+        <div style="display:flex; align-items:center; gap:1rem;">
+            <button onclick="syncManual()" class="btn btn-outline" style="background:transparent; color:white; border:1px solid rgba(255,255,255,0.3); padding:0.3rem 0.6rem; font-size:0.8rem">🔄 Sincronizar</button>
+            <a href="/" class="btn btn-outline" style="background:white; color:#0f172a;">⬅️ Voltar ao Início</a>
+            <a href="/relatorios/export/excel?tab=inventario" class="btn btn-green">📊 Exportar Excel</a>
+            <a href="/relatorio_pdf" target="_blank" class="btn btn-blue">📄 Imprimir Relatório PDF</a>
         </div>
     </div>
     <div class="container">
@@ -436,7 +454,7 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
 <body>
     <div class="nav">
         <strong>STAE GESTÃO</strong>
-        <div>👤 {{session.nome}} ({{session.perfil}}) | <a href="/logout" style="color:white">Sair</a></div>
+        <div style="display:flex; align-items:center; gap:1rem;"><button onclick="syncManual()" class="btn btn-outline" style="background:transparent; color:white; border:1px solid rgba(255,255,255,0.3); padding:0.3rem 0.6rem; font-size:0.8rem">🔄 Sincronizar</button> <span>👤 {{session.nome}} ({{session.perfil}})</span> | <a href="/logout" style="color:white">Sair</a></div>
     </div>
     <div class="container">
         {% if msg %}<div style="background:#dcfce3; color:#166534; padding:1rem; border-radius:0.5rem; margin-bottom:1rem;">{{msg}}</div>{% endif %}
@@ -1026,7 +1044,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
 </style>
 </head>
 <body>
-    <div class="nav"><strong>STAE GESTÃO - ADMINISTRAÇÃO</strong><div><a href="/" style="color:white">⬅️ Voltar ao Início</a></div></div>
+    <div class="nav"><strong>STAE GESTÃO - ADMINISTRAÇÃO</strong><div style="display:flex; align-items:center; gap:1rem;"><button onclick="syncManual()" class="btn btn-outline" style="background:transparent; color:white; border:1px solid rgba(255,255,255,0.3); padding:0.3rem 0.6rem; font-size:0.8rem">🔄 Sincronizar</button><a href="/" style="color:white">⬅️ Voltar ao Início</a></div></div>
     <div class="container">
         {% if msg %}<div style="background:#dcfce3; color:#166534; padding:1rem; border-radius:0.5rem; margin-bottom:1rem;">{{msg}}</div>{% endif %}
         
@@ -2518,6 +2536,15 @@ def edit_user(id):
         c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, password=?, setor_id=?, eleitoral_local_id=? WHERE id=?", (nome_completo, username, perfil, hashed, setor_val, eleitoral_local_val, id))
     else:
         c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, setor_id=?, eleitoral_local_id=? WHERE id=?", (nome_completo, username, perfil, setor_val, eleitoral_local_val, id))
+    
+    # Check if we are updating our own profile, and if so, update the session
+    c.execute("SELECT username FROM users WHERE id=?", (id,))
+    res = c.fetchone()
+    if res and res[0] == session.get('username'):
+        session['nome'] = nome_completo or username
+        session['perfil'] = perfil
+        session['username'] = username
+        
     conn.commit()
     conn.close()
     return redirect(url_for('cadastros', msg="Utilizador atualizado!"))
@@ -3180,24 +3207,68 @@ def relatorios_export(format_type):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     if format_type == 'excel':
-        # Generate UTF-8 BOM CSV for Excel
-        output = io.StringIO()
-        output.write('ï»¿') # BOM
-        import csv
-        writer = csv.writer(output, delimiter=';')
-        writer.writerow(headers)
-        for r in rows:
-            # Format row fields as strings
-            writer.writerow([str(val) if val is not None else '' for val in r])
+        import openpyxl
+        from openpyxl.styles import PatternFill, Font
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = title if title else "Relatorio"
+        
+        header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True)
+        
+        green_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+        green_font = Font(color="166534", bold=True)
+        
+        red_fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+        red_font = Font(color="991B1B", bold=True)
+        
+        yellow_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+        yellow_font = Font(color="D97706", bold=True)
+        
+        ws.append(headers)
+        for col in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col)
+            cell.fill = header_fill
+            cell.font = header_font
             
-        mem = io.BytesIO()
-        mem.write(output.getvalue().encode('utf-8'))
-        mem.seek(0)
+        for r in rows:
+            ws.append([str(val) if val is not None else '' for val in r])
+            current_row = ws.max_row
+            # Try to color status cells
+            for col_idx, col_name in enumerate(headers):
+                cell_val = str(r[col_idx]).upper() if r[col_idx] is not None else ""
+                cell = ws.cell(row=current_row, column=col_idx + 1)
+                
+                if "RECEBIDO" in cell_val or "ENTREGUE" in cell_val or "BOM ESTADO" in cell_val or "BOM" == cell_val:
+                    cell.fill = green_fill
+                    cell.font = green_font
+                elif "REJEITADO" in cell_val or "AVARIADO" in cell_val or "MAU ESTADO" in cell_val or "MAU" == cell_val:
+                    cell.fill = red_fill
+                    cell.font = red_font
+                elif "PENDENTE" in cell_val or "EM_TRANSITO" in cell_val or "MANUTENÇÃO" in cell_val:
+                    cell.fill = yellow_fill
+                    cell.font = yellow_font
+                    
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = (max_length + 2)
+            ws.column_dimensions[column].width = adjusted_width
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
         return send_file(
-            mem,
+            output,
             as_attachment=True,
-            download_name=f"relatorio_{tab}_{timestamp}.csv",
-            mimetype='text/csv'
+            download_name=f"relatorio_{tab}_{timestamp}.xlsx",
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
         
     elif format_type == 'pdf':
