@@ -84,8 +84,11 @@
                     <td><span style="color: #166534;">{{ m.quantidade_bom }}</span></td>
                     <td><span style="color: #991b1b;">{{ m.quantidade_mau }}</span></td>
                     <td>{{ m.origem }}</td>
-                    <td>
-                        <button class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem;">Editar</button>
+                    <td style="display:flex; gap:0.5rem;">
+                        <button class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem;" onclick="abrirModalEditar('{{ m.id }}', '{{ m.quantidade_total }}', '{{ m.quantidade_bom }}', '{{ m.quantidade_mau }}')">Editar</button>
+                        <form method="POST" action="/eleitoral/material/apagar/{{ m.id }}" onsubmit="return confirm('Tem a certeza que deseja apagar este material?');" style="display:inline;">
+                            <button type="submit" class="btn btn-danger" style="padding:0.2rem 0.5rem; font-size:0.8rem;">Apagar</button>
+                        </form>
                     </td>
                 </tr>
                 {% endfor %}
@@ -175,6 +178,35 @@
     </div>
 </div>
 
+
+<!-- Modal Editar Material -->
+<div id="modal-editar-material" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+    <div style="background:white; max-width:500px; margin: 100px auto; padding: 2rem; border-radius:8px;">
+        <h3>Editar Quantidades</h3>
+        <form id="form-editar" method="POST" action="">
+            <div style="display:flex; gap: 1rem; margin-bottom: 1rem;">
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Qtd Total</label>
+                    <input type="number" name="quantidade_total" id="edit_total" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Bom</label>
+                    <input type="number" name="quantidade_bom" id="edit_bom" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Mau</label>
+                    <input type="number" name="quantidade_mau" id="edit_mau" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                </div>
+            </div>
+
+            <div style="text-align: right; margin-top: 2rem;">
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-editar-material').style.display='none'">Cancelar</button>
+                <button type="submit" class="btn btn-blue">Gravar Alterações</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Modal para Importar Ficheiro -->
 <div id="modal-importar" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
     <div style="background:#fff; padding:2rem; border-radius:8px; width:400px; max-width:90%;">
@@ -190,8 +222,24 @@
                 </select>
             </div>
             <div style="margin-bottom: 1rem;">
-                <label style="display:block; margin-bottom: 0.5rem;">Ficheiro (.docx)</label>
-                <input type="file" name="file" accept=".docx" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                <label style="display:block; margin-bottom: 0.5rem;">Ficheiro Excel (.xlsx)</label>
+                <input type="file" name="file" accept=".xlsx" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                <small style="color:#64748b">O ficheiro deve ter as colunas: Província, Tipo, Variante, Total, Bom, Mau.</small>
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem; font-weight:bold;">Modo de Importação:</label>
+                <div>
+                    <input type="radio" name="modo_importacao" value="adicionar" id="modo_add" checked>
+                    <label for="modo_add" style="margin-left:0.3rem;">Adicionar aos existentes</label>
+                </div>
+                <div style="margin-top:0.5rem;">
+                    <input type="radio" name="modo_importacao" value="substituir" id="modo_sub">
+                    <label for="modo_sub" style="margin-left:0.3rem;">Substituir (atualizar valores)</label>
+                </div>
+            </div>
+            <div style="margin-bottom: 1rem; margin-top:1.5rem; padding-top:1rem; border-top:1px solid #e2e8f0;">
+                <input type="checkbox" name="limpar_provincia" id="limpar_prov" value="sim">
+                <label for="limpar_prov" style="margin-left:0.3rem; color:#b91c1c; font-weight:bold;">Apagar todos os dados da Província do ficheiro antes de importar</label>
             </div>
             <div style="text-align: right; margin-top: 2rem;">
                 <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-importar').style.display='none'">Cancelar</button>
@@ -206,6 +254,14 @@
 {% block scripts %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script>
+function abrirModalEditar(id, total, bom, mau) {
+    document.getElementById('edit_total').value = total;
+    document.getElementById('edit_bom').value = bom;
+    document.getElementById('edit_mau').value = mau;
+    document.getElementById('form-editar').action = "/eleitoral/material/editar/" + id;
+    document.getElementById('modal-editar-material').style.display = 'block';
+}
+
 function exportarPDF() {
     var element = document.getElementById('area-tabela');
     var opt = {

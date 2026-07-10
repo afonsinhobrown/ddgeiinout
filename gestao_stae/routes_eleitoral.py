@@ -301,15 +301,57 @@ def material():
     return render_template('eleitoral/material.html', processos=processos, locais=locais, 
                            processo_id=processo_id, local_id=local_id, tipo_material_id=tipo_material_id,
                            materiais=materiais, tipos_material=tipos_material)
+@eleitoral_bp.route('/material/editar/<int:id>', methods=['POST'])
+def editar_material(id):
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor()
+    try:
+        from flask import request, flash, redirect, url_for
+        qtd_total = request.form.get('quantidade_total', 0)
+        qtd_bom = request.form.get('quantidade_bom', 0)
+        qtd_mau = request.form.get('quantidade_mau', 0)
+        param_marker = "%s" if is_pg else "?"
+        c.execute(f"UPDATE eleitoral_material_sobrante SET quantidade_total = {param_marker}, quantidade_bom = {param_marker}, quantidade_mau = {param_marker} WHERE id = {param_marker}", (qtd_total, qtd_bom, qtd_mau, id))
+        conn.commit()
+        flash('Material atualizado com sucesso!', 'success')
+    except Exception as e:
+        conn.rollback()
+        flash(f'Erro: {str(e)}', 'error')
+    finally:
+        conn.close()
+    return redirect(request.referrer or url_for('eleitoral.material'))
+
+@eleitoral_bp.route('/material/apagar/<int:id>', methods=['POST'])
+def apagar_material(id):
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor()
+    try:
+        from flask import request, flash, redirect, url_for
+        param_marker = "%s" if is_pg else "?"
+        c.execute(f"DELETE FROM eleitoral_material_sobrante WHERE id = {param_marker}", (id,))
+        conn.commit()
+        flash('Material removido com sucesso!', 'success')
+    except Exception as e:
+        conn.rollback()
+        flash(f'Erro: {str(e)}', 'error')
+    finally:
+        conn.close()
+    return redirect(request.referrer or url_for('eleitoral.material'))
+
 @eleitoral_bp.route('/importacao', methods=['POST'])
 def importacao_excel():
     if 'file' not in request.files:
         flash("Nenhum ficheiro selecionado", "error")
         return redirect(url_for('eleitoral.material'))
+    
     file = request.files['file']
     if file.filename == '':
         flash("Nenhum ficheiro selecionado", "error")
         return redirect(url_for('eleitoral.material'))
+        
+    processo_id = request.form.get('processo_id')
+    modo = request.form.get('modo_importacao', 'adicionar')
+    limpar = request.form.get('limpar_provincia') == 'sim'
     
     if file and file.filename.endswith('.xlsx'):
         try:
@@ -317,16 +359,98 @@ def importacao_excel():
             wb = openpyxl.load_workbook(file)
             sheet = wb.active
             
-            # Aqui entraria a lógica iterativa para ler linhas e importar, 
-            # validando locais e tipos de material contra a BD.
-            # Por agora registamos apenas a operação de sucesso para fechar o ciclo.
-            flash(f"Ficheiro {file.filename} carregado com sucesso. (Lógica de inserção na BD pendente)", "success")
+            conn, is_pg = get_eleitoral_db()
+            c = conn.cursor()
+            
+            # Helper to fetch maps
+            c.execute("SELECT id, nome FROM eleitoral_local_armazenamento")
+            locais_map = {row[1].strip().lower(): row[0] for row in c.fetchall()}
+            
+            c.execute("SELECT id, nome, variante FROM eleitoral_tipo_material")
+            tipos_map = {}
+            for row in c.fetchall():
+                nome = row[1].strip().lower() if row[1] else ""
+                variante = row[2].strip().lower() if row[2] else ""
+                tipos_map[(nome, variante)] = row[0]
+                
+            locais_limpos = set()
+            registos_adicionados = 0
+            
+            # Assumimos cabeçalho na linha 1. Colunas: Provincia, Tipo, Variante, Total, Bom, Mau
+            # Vamos tentar ler pelas colunas caso existam
+            header = [str(cell.value).strip().lower() if cell.value else '' for cell in sheet[1]]
+            
+            # Fallback for indices if header doesn't match perfectly
+            col_prov = header.index('província') if 'província' in header else (header.index('provincia') if 'provincia' in header else 0)
+            col_tipo = header.index('tipo') if 'tipo' in header else 1
+            col_var = header.index('variante') if 'variante' in header else 2
+            col_tot = header.index('total') if 'total' in header else 3
+            col_bom = header.index('bom') if 'bom' in header else 4
+            col_mau = header.index('mau') if 'mau' in header else 5
+            
+            utilizador_id = session.get('user_id', 1)
+            
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                if not row[col_prov] or not row[col_tipo]: continue
+                
+                prov = str(row[col_prov]).strip()
+                tipo = str(row[col_tipo]).strip()
+                var = str(row[col_var]).strip() if len(row) > col_var and row[col_var] else ""
+                
+                try: tot = int(row[col_tot]) if len(row) > col_tot and row[col_tot] else 0
+                except: tot = 0
+                try: bom = int(row[col_bom]) if len(row) > col_bom and row[col_bom] else 0
+                except: bom = 0
+                try: mau = int(row[col_mau]) if len(row) > col_mau and row[col_mau] else 0
+                except: mau = 0
+                
+                # Match local
+                local_id = locais_map.get(prov.lower())
+                if not local_id:
+                    # Tenta match parcial
+                    for k, v in locais_map.items():
+                        if k in prov.lower() or prov.lower() in k:
+                            local_id = v
+                            break
+                            
+                # Match tipo
+                tipo_id = tipos_map.get((tipo.lower(), var.lower()))
+                if not tipo_id:
+                    # Tenta sem variante
+                    tipo_id = tipos_map.get((tipo.lower(), ""))
+                    
+                if local_id and tipo_id:
+                    if limpar and local_id not in locais_limpos:
+                        c.execute(f"DELETE FROM eleitoral_material_sobrante WHERE processo_id = {'%s' if is_pg else '?'} AND local_id = {'%s' if is_pg else '?'}", (processo_id, local_id))
+                        locais_limpos.add(local_id)
+                        
+                    # Verifica se já existe
+                    c.execute(f"SELECT id, quantidade_total, quantidade_bom, quantidade_mau FROM eleitoral_material_sobrante WHERE processo_id = {'%s' if is_pg else '?'} AND local_id = {'%s' if is_pg else '?'} AND tipo_material_id = {'%s' if is_pg else '?'}", (processo_id, local_id, tipo_id))
+                    existing = c.fetchone()
+                    
+                    if existing:
+                        m_id = existing[0]
+                        if modo == 'adicionar':
+                            new_tot = existing[1] + tot
+                            new_bom = existing[2] + bom
+                            new_mau = existing[3] + mau
+                            c.execute(f"UPDATE eleitoral_material_sobrante SET quantidade_total = {'%s' if is_pg else '?'}, quantidade_bom = {'%s' if is_pg else '?'}, quantidade_mau = {'%s' if is_pg else '?'} WHERE id = {'%s' if is_pg else '?'}", (new_tot, new_bom, new_mau, m_id))
+                        else:
+                            c.execute(f"UPDATE eleitoral_material_sobrante SET quantidade_total = {'%s' if is_pg else '?'}, quantidade_bom = {'%s' if is_pg else '?'}, quantidade_mau = {'%s' if is_pg else '?'} WHERE id = {'%s' if is_pg else '?'}", (tot, bom, mau, m_id))
+                    else:
+                        c.execute(f"INSERT INTO eleitoral_material_sobrante (processo_id, local_id, tipo_material_id, quantidade_total, quantidade_bom, quantidade_mau, origem, utilizador_id) VALUES ({'%s' if is_pg else '?'}, {'%s' if is_pg else '?'}, {'%s' if is_pg else '?'}, {'%s' if is_pg else '?'}, {'%s' if is_pg else '?'}, {'%s' if is_pg else '?'}, 'IMPORTACAO_EXCEL', {'%s' if is_pg else '?'})", (processo_id, local_id, tipo_id, tot, bom, mau, utilizador_id))
+                    registos_adicionados += 1
+            
+            conn.commit()
+            conn.close()
+            flash(f"Importação concluída! {registos_adicionados} registos processados.", "success")
         except Exception as e:
             flash(f"Erro ao processar ficheiro Excel: {str(e)}", "error")
     else:
         flash("Apenas ficheiros .xlsx são permitidos.", "error")
         
     return redirect(url_for('eleitoral.material'))
+
 @eleitoral_bp.route('/catalogos')
 def catalogos():
     conn, is_pg = get_eleitoral_db()
