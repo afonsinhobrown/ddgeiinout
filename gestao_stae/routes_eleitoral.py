@@ -1,5 +1,10 @@
 from flask import Blueprint, render_template, request, session, redirect, url_for, flash
 import sqlite3
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    pass
 
 # Define o Blueprint
 eleitoral_bp = Blueprint('eleitoral', __name__, url_prefix='/eleitoral')
