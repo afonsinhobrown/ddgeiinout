@@ -303,9 +303,19 @@ def material():
                            materiais=materiais, tipos_material=tipos_material)
 @eleitoral_bp.route('/material/editar/<int:id>', methods=['POST'])
 def editar_material(id):
+    from flask import session
     conn, is_pg = get_eleitoral_db()
     c = conn.cursor()
     try:
+        user_local_id = session.get('eleitoral_local_id')
+        if user_local_id:
+            c.execute(f"SELECT local_id FROM eleitoral_material_sobrante WHERE id = {'%s' if is_pg else '?'}", (id,))
+            res = c.fetchone()
+            if not res or str(res[0]) != str(user_local_id):
+                from flask import flash, redirect, url_for
+                flash('Acesso negado: Não tem permissões para editar este material.', 'error')
+                return redirect(url_for('eleitoral.material'))
+
         from flask import request, flash, redirect, url_for
         qtd_total = request.form.get('quantidade_total', 0)
         qtd_bom = request.form.get('quantidade_bom', 0)
@@ -323,9 +333,19 @@ def editar_material(id):
 
 @eleitoral_bp.route('/material/apagar/<int:id>', methods=['POST'])
 def apagar_material(id):
+    from flask import session
     conn, is_pg = get_eleitoral_db()
     c = conn.cursor()
     try:
+        user_local_id = session.get('eleitoral_local_id')
+        if user_local_id:
+            c.execute(f"SELECT local_id FROM eleitoral_material_sobrante WHERE id = {'%s' if is_pg else '?'}", (id,))
+            res = c.fetchone()
+            if not res or str(res[0]) != str(user_local_id):
+                from flask import flash, redirect, url_for
+                flash('Acesso negado: Não tem permissões para apagar este material.', 'error')
+                return redirect(url_for('eleitoral.material'))
+
         from flask import request, flash, redirect, url_for
         param_marker = "%s" if is_pg else "?"
         c.execute(f"DELETE FROM eleitoral_material_sobrante WHERE id = {param_marker}", (id,))
