@@ -250,7 +250,7 @@ def create_triggers(c):
             AFTER INSERT ON {t}
             BEGIN
                 UPDATE {t} SET 
-                    last_modified = datetime('now', 'localtime'),
+                    last_modified = datetime('now'),
                     origem_registo = COALESCE(new.origem_registo, '{origem_padrao}')
                 WHERE id = new.id;
             END;
@@ -261,7 +261,7 @@ def create_triggers(c):
             FOR EACH ROW
             WHEN new.last_modified IS NULL OR new.last_modified = old.last_modified OR new.last_modified = '2026-06-24T00:00:00'
             BEGIN
-                UPDATE {t} SET last_modified = datetime('now', 'localtime') WHERE id = old.id;
+                UPDATE {t} SET last_modified = datetime('now') WHERE id = old.id;
             END;
         ''')
 
