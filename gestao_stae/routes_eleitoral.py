@@ -20,6 +20,45 @@ def get_eleitoral_db():
         conn.row_factory = sqlite3.Row
         return conn, False # False indica que é SQLite
 
+def get_pg_for_dual_write():
+    """Tenta obter ligação PG para dual-write. Retorna None se não houver internet."""
+    try:
+        from app import get_pg_connection
+        conn = get_pg_connection()
+        if conn:
+            return conn
+    except Exception:
+        pass
+    return None
+
+def dual_execute(s_conn, pg_conn, sqlite_sql, pg_sql, params_sqlite, params_pg=None):
+    """
+    Executa uma query em SQLite E PostgreSQL simultaneamente.
+    Se PG falhar, apenas regista o erro mas não bloqueia o SQLite.
+    Retorna o cursor SQLite (fonte de verdade).
+    """
+    if params_pg is None:
+        params_pg = params_sqlite
+    
+    # Sempre escreve no SQLite (fonte de verdade local)
+    s_c = s_conn.cursor()
+    s_c.execute(sqlite_sql, params_sqlite)
+    
+    # Tenta escrever no PG também (dual-write)
+    if pg_conn:
+        try:
+            pg_c = pg_conn.cursor()
+            pg_c.execute(pg_sql, params_pg)
+            pg_conn.commit()
+        except Exception as e:
+            try:
+                pg_conn.rollback()
+            except:
+                pass
+            print(f"[dual-write] Aviso PG: {e}")
+    
+    return s_c
+
 def check_permission():
     if 'username' not in session:
         return False
@@ -323,6 +362,25 @@ def editar_material(id):
         param_marker = "%s" if is_pg else "?"
         c.execute(f"UPDATE eleitoral_material_sobrante SET quantidade_total = {param_marker}, quantidade_bom = {param_marker}, quantidade_mau = {param_marker} WHERE id = {param_marker}", (qtd_total, qtd_bom, qtd_mau, id))
         conn.commit()
+        
+        # DUAL-WRITE: Se em modo local, replicar também no PG
+        if not is_pg:
+            pg = get_pg_for_dual_write()
+            if pg:
+                try:
+                    # No PG, procurar pelo processo+local+tipo (IDs podem diferir)
+                    c.execute(f"SELECT processo_id, local_id, tipo_material_id FROM eleitoral_material_sobrante WHERE id = ?", (id,))
+                    row = c.fetchone()
+                    if row:
+                        pg_c = pg.cursor()
+                        pg_c.execute("UPDATE eleitoral_material_sobrante SET quantidade_total=%s, quantidade_bom=%s, quantidade_mau=%s WHERE processo_id=%s AND local_id=%s AND tipo_material_id=%s",
+                                     (qtd_total, qtd_bom, qtd_mau, row[0], row[1], row[2]))
+                        pg.commit()
+                except Exception as e:
+                    print(f"[dual-write editar] {e}")
+                finally:
+                    pg.close()
+        
         flash('Material atualizado com sucesso!', 'success')
     except Exception as e:
         conn.rollback()
@@ -348,8 +406,30 @@ def apagar_material(id):
 
         from flask import request, flash, redirect, url_for
         param_marker = "%s" if is_pg else "?"
+        
+        # DUAL-WRITE: Guardar processo+local+tipo antes de apagar (para apagar no PG)
+        pg_keys = None
+        if not is_pg:
+            c.execute("SELECT processo_id, local_id, tipo_material_id FROM eleitoral_material_sobrante WHERE id = ?", (id,))
+            pg_keys = c.fetchone()
+        
         c.execute(f"DELETE FROM eleitoral_material_sobrante WHERE id = {param_marker}", (id,))
         conn.commit()
+        
+        # DUAL-WRITE: Apagar também no PG
+        if not is_pg and pg_keys:
+            pg = get_pg_for_dual_write()
+            if pg:
+                try:
+                    pg_c = pg.cursor()
+                    pg_c.execute("DELETE FROM eleitoral_material_sobrante WHERE processo_id=%s AND local_id=%s AND tipo_material_id=%s",
+                                 (pg_keys[0], pg_keys[1], pg_keys[2]))
+                    pg.commit()
+                except Exception as e:
+                    print(f"[dual-write apagar] {e}")
+                finally:
+                    pg.close()
+        
         flash('Material removido com sucesso!', 'success')
     except Exception as e:
         conn.rollback()
@@ -462,6 +542,32 @@ def importacao_excel():
                     registos_adicionados += 1
             
             conn.commit()
+            
+            # DUAL-WRITE: Se em modo local, replicar no PG também
+            if not is_pg:
+                pg = get_pg_for_dual_write()
+                if pg:
+                    try:
+                        pg_c = pg.cursor()
+                        # Replicate all material for this processo
+                        c.execute("SELECT processo_id, local_id, tipo_material_id, quantidade_total, quantidade_bom, quantidade_mau, origem, utilizador_id FROM eleitoral_material_sobrante WHERE processo_id = ?", (processo_id,))
+                        for ms_row in c.fetchall():
+                            pg_c.execute("""
+                                INSERT INTO eleitoral_material_sobrante 
+                                    (processo_id, local_id, tipo_material_id, quantidade_total, quantidade_bom, quantidade_mau, origem, utilizador_id)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (processo_id, local_id, tipo_material_id) 
+                                DO UPDATE SET quantidade_total=EXCLUDED.quantidade_total, quantidade_bom=EXCLUDED.quantidade_bom, quantidade_mau=EXCLUDED.quantidade_mau
+                            """, (ms_row[0], ms_row[1], ms_row[2], ms_row[3], ms_row[4], ms_row[5], ms_row[6], ms_row[7]))
+                        pg.commit()
+                        print(f"[dual-write importacao] Replicado para PG com sucesso")
+                    except Exception as e:
+                        print(f"[dual-write importacao] Erro PG: {e}")
+                        try: pg.rollback()
+                        except: pass
+                    finally:
+                        pg.close()
+            
             conn.close()
             flash(f"Importação concluída! {registos_adicionados} registos processados.", "success")
         except Exception as e:
