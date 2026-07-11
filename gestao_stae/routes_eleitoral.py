@@ -689,14 +689,14 @@ def exportar_excel():
     wb = Workbook()
     
     # Estilos
-    header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
-    header_font = Font(color="FFFFFF", bold=True)
+    header_fill = PatternFill(start_color="FF1E293B", end_color="FF1E293B", fill_type="solid")
+    header_font = Font(color="FFFFFFFF", bold=True)
     
-    bom_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
-    bom_font = Font(color="166534", bold=True)
+    bom_fill = PatternFill(start_color="FFDCFCE7", end_color="FFDCFCE7", fill_type="solid")
+    bom_font = Font(color="FF166534", bold=True)
     
-    mau_fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
-    mau_font = Font(color="991B1B", bold=True)
+    mau_fill = PatternFill(start_color="FFFEE2E2", end_color="FFFEE2E2", fill_type="solid")
+    mau_font = Font(color="FF991B1B", bold=True)
     
     # Aba 1: Categoria
     ws1 = wb.active

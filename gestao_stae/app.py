@@ -1,5 +1,7 @@
 import os
 import sqlite3
+import decimal
+sqlite3.register_adapter(decimal.Decimal, float)
 import webbrowser
 from datetime import datetime
 from threading import Timer
