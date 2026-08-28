@@ -59,11 +59,17 @@ Branch `main`, `git status` LIMPO, sem conflitos, sem trabalho não commitado. �
 - Estados intermédios já existem: `EM_ESTOQUE`, `EM_PREPARACAO`, `EMPACOTAMENTO`, `A_ESPERA_ENVIO`, `EM_TRANSITO`, `RECEBIDO`, `EM_USO`, `AVARIADO`.
 
 **Trabalho a fazer:**
-- [ ] Associar usuários atuais ao local DDGEI (setor_id=3).
-- [ ] Formulário de saída: origem automática (setor do usuário) para não-admin; selecionável para admin.
-- [ ] Histórico de movimentos: mostrar origem e destino separados + estado.
-- [ ] Estados de saída no fluxo de saída.
+- [x] Associar usuários atuais ao local DDGEI (setor_id=3) — feito em `check_db_integrity`.
+- [x] Formulário de saída: origem automática (setor do usuário) para não-admin; selecionável para admin — feito no `MAIN_TEMPLATE` + `registrar_saida`.
+- [x] Histórico de movimentos: mostrar origem e destino separados + estado — feito no `MAIN_TEMPLATE`.
+- [x] Estados de saída no formulário de saída (campo `estado_saida` guardado em `estado_rastreio`) — feito.
+- [ ] **FLUXO COMPLETO DE ESTADOS NÃO IMPLEMENTADO** — falta o mecanismo de mudar o estado ao longo do tempo (preparação → empacotamento → à espera de envio → enviado → recebido) e o controlo de permissões (quem envia não pode marcar como recebido). O estado não aparece nas opções do material.
 - [ ] Admin configura quais usuários realizam ações (campo de permissão no cadastro de usuários).
+
+> **NOTA IMPORTANTE (2026-08-29):** O trabalho está **INCOMPLETO**. Foi adicionado apenas o campo "Estado de Saída" no formulário e guardado na BD, mas o **fluxo completo de mudança de estado** e o **controlo de permissões** (quem envia não pode marcar como recebido) **NÃO foram implementados**. O utilizador reportou que o estado não aparece nas opções do material e que a mudança de status está confusa. Este trabalho deve ser retomado numa próxima sessão com foco em:
+1. Botão/opção para mudar o estado de um movimento ao longo do tempo.
+2. Regras de permissão: origem pode marcar preparação/empacotamento/à espera de envio/enviado; destino pode marcar recebido.
+3. Mostrar o estado atual nas opções do material.
 
 ## 4. ESTADO DE IMPLEMENTAÇÃO (2026-08-28)
 
