@@ -2,7 +2,7 @@
 
 > **Documento de continuidade.** Qualquer agente/sessão que retomar este projeto DEVE ler este ficheiro primeiro. Atualizar sempre que concluir ou iniciar trabalho. Registar aqui o estado real, decisões e pendências — nunca depender de stash/commits para comunicação.
 
-Última atualização: 2026-08-28
+Última atualização: 2026-08-29
 
 ---
 
@@ -36,6 +36,34 @@ Branch `main`, `git status` LIMPO, sem conflitos, sem trabalho não commitado. �
 - `9f0832d` / `4b433eb` / `b597956` feat: suporte hybrid SQLite/PG e migração
 
 **Todos os ficheiros compilam.** App sobe com `python app.py` (ou `executar.bat`).
+
+## 4. ESTADO DE IMPLEMENTAÇÃO (2026-08-29)
+
+### NOVO TRABALHO EM CURSO — Desvincular do DDGEI / Locais / Saída por local
+
+**Requisitos do utilizador (2026-08-29):**
+1. O sistema **não deve estar ligado ao DDGEI** — o inventário deve ser de **todos os locais** onde o equipamento é cadastrado.
+2. **Usuários associados a um lugar** — os usuários atuais devem ser associados ao local DDGEI.
+3. **Saída de equipamento de um lugar para outro**:
+   - Deve ser feita pelo **usuário desse local** (origem = local do usuário, não selecionável).
+   - Quando é **admin**, o local de origem **pode ser selecionado**.
+4. **Histórico de movimentos** deve mostrar **origem e destino separados** e mostrar **estado do equipamento**.
+5. **Estados de saída**: preparação, empacotamento, à espera de envio, enviado, recebido.
+6. **Admin configura quais usuários realizam essas ações**.
+
+**Estado atual do código:**
+- `users` já tem `setor_id` (local). Os usuários atuais têm `setor_id=1` (RECENSEAMENTO E SUFRAGIO) — devem ser associados ao DDGEI (setor_id=3).
+- `inventario_local` já tem `setor_id` (local de armazenamento).
+- `movimentos` já tem `setor_origem_id`, `setor_destino_id`, `local_origem`, `local_destino`, `estado_rastreio`.
+- `registrar_saida` usa `session.get('setor_id')` como origem — já correto para não-admin.
+- Estados intermédios já existem: `EM_ESTOQUE`, `EM_PREPARACAO`, `EMPACOTAMENTO`, `A_ESPERA_ENVIO`, `EM_TRANSITO`, `RECEBIDO`, `EM_USO`, `AVARIADO`.
+
+**Trabalho a fazer:**
+- [ ] Associar usuários atuais ao local DDGEI (setor_id=3).
+- [ ] Formulário de saída: origem automática (setor do usuário) para não-admin; selecionável para admin.
+- [ ] Histórico de movimentos: mostrar origem e destino separados + estado.
+- [ ] Estados de saída no fluxo de saída.
+- [ ] Admin configura quais usuários realizam ações (campo de permissão no cadastro de usuários).
 
 ## 4. ESTADO DE IMPLEMENTAÇÃO (2026-08-28)
 

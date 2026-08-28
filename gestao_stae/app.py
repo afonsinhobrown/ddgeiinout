@@ -268,7 +268,11 @@ def check_db_integrity(c):
         u_cols = [row[1] for row in c.fetchall()]
         if 'setor_id' not in u_cols: 
             c.execute("ALTER TABLE users ADD COLUMN setor_id INTEGER")
-            c.execute("UPDATE users SET setor_id = 1 WHERE perfil != 'admin' AND setor_id IS NULL")
+        # Associar usuarios sem local ao DDGEI por defeito
+        c.execute("SELECT id FROM setores WHERE nome LIKE '%DDGEI%' OR nome LIKE '%DELIMITA%' LIMIT 1")
+        ddgei_row = c.fetchone()
+        ddgei_id = ddgei_row[0] if ddgei_row else 3
+        c.execute("UPDATE users SET setor_id = ? WHERE setor_id IS NULL", (ddgei_id,))
         if 'provincia_id' not in u_cols: c.execute("ALTER TABLE users ADD COLUMN provincia_id INTEGER")
         
         tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material', 'equipamento_rastreio', 'equipamento_estado_historico']
@@ -677,6 +681,19 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                         </select>
                     </div>
                     <div><label>S/N / Nº Série</label><input name="numero_serie" required placeholder="Ex: 1234 ou N/A"></div>
+                    {% if session.perfil == 'admin' %}
+                    <div><label>Origem (Local)</label>
+                        <select name="origem" required>
+                            <option value="">-- Selecione o local de origem --</option>
+                            {% for s in setores %}<option value="SETOR_{{s.id}}">{{s.nome}}</option>{% endfor %}
+                        </select>
+                    </div>
+                    {% else %}
+                    <div><label>Origem (Local)</label>
+                        <input type="text" value="{{ meu_setor_nome or 'DDGEI' }}" readonly style="background:#f1f5f9; color:#475569;">
+                        <input type="hidden" name="origem" value="SETOR_{{ meu_setor_id or 3 }}">
+                    </div>
+                    {% endif %}
                     <div><label>Destino</label>
                         <select name="destino" required>
                             <option value="">-- Selecione --</option>
@@ -686,6 +703,15 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                             <optgroup label="Instituições Externas">
                                 {% for i in instituicoes %}<option value="Externo - {{i.nome}}">{{i.nome}}</option>{% endfor %}
                             </optgroup>
+                        </select>
+                    </div>
+                    <div><label>Estado de Saída</label>
+                        <select name="estado_saida" required>
+                            <option value="EM_PREPARACAO">Em preparação</option>
+                            <option value="EMPACOTAMENTO">Empacotamento</option>
+                            <option value="A_ESPERA_ENVIO">À espera de envio</option>
+                            <option value="ENVIADO">Enviado</option>
+                            <option value="RECEBIDO">Recebido</option>
                         </select>
                     </div>
                     <div><label>Fornecedor</label>
@@ -729,16 +755,17 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
             <table id="mainTable" style="width:100%; border-collapse:collapse; margin-top:1rem; font-size:0.9rem">
                 <tr style="background:#f1f5f9; text-align:left; color:#64748b; font-size:0.8rem">
                     <th style="padding:1rem">GUIA</th><th style="padding:1rem">EQUIPAMENTO</th>
-                    <th style="padding:1rem">S/N</th><th style="padding:1rem">ORIGEM/DESTINO</th>
-                    <th style="padding:1rem">STATUS</th><th style="padding:1rem">DATA</th><th style="padding:1rem">ACÇÕES</th>
+                    <th style="padding:1rem">S/N</th><th style="padding:1rem">ORIGEM</th><th style="padding:1rem">DESTINO</th>
+                    <th style="padding:1rem">ESTADO</th><th style="padding:1rem">DATA</th><th style="padding:1rem">ACÇÕES</th>
                 </tr>
                 {% for m in movimentos %}
                 <tr style="border-bottom:1px solid var(--border)">
                     <td style="padding:1rem"><strong>{{m.guia[:8]}}</strong><br>{{m.guia[8:]}}</td>
                     <td style="padding:1rem">{{m.equipamento}}<br><small style="color:#64748b">({{m.marca}})</small></td>
                     <td style="padding:1rem">{{m.numero_serie}}</td>
-                    <td style="padding:1rem">{{m.origem_destino}}</td>
-                    <td style="padding:1rem">{{m.status}}</td>
+                    <td style="padding:1rem">{% if m.tipo == 'ENTRADA' %}{{ m.origem_destino or m.local_origem or '-' }}{% else %}{{ m.local_origem or 'DDGEI' }}{% endif %}</td>
+                    <td style="padding:1rem">{% if m.tipo == 'SAIDA' %}{{ m.origem_destino or m.local_destino or '-' }}{% else %}{{ m.local_destino or 'DDGEI' }}{% endif %}</td>
+                    <td style="padding:1rem">{{ (m.estado_rastreio or m.status or '').replace('_',' ') }}</td>
                     <td style="padding:1rem">{{m.data[:10]}}<br><small style="color:#64748b">{{m.data[11:]}}</small></td>
                     <td style="padding:1rem">
                         <button onclick="toggleDetails('det_{{loop.index}}')" class="btn btn-outline" style="padding:0.3rem 0.6rem; font-size:0.8rem; margin-right:0.3rem;">Detalhes</button>
@@ -2569,12 +2596,20 @@ def index():
     c.execute("SELECT id, nome FROM instituicoes")
     instituicoes = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     
+    # Nome do setor do usuario (para mostrar origem automatica)
+    meu_setor_nome = 'DDGEI'
+    if setor_id:
+        for s in setores:
+            if s['id'] == setor_id:
+                meu_setor_nome = s['nome']
+                break
+    
     c.execute("SELECT COUNT(*) FROM movimentos WHERE tipo='ENTRADA' AND status LIKE '%repara%'")
     row_count = c.fetchone()
     em_reparacao = row_count[0] if row_count else 0
     
     conn.close()
-    return render_template_string(MAIN_TEMPLATE, msg=msg, username=session['username'], perfil=session.get('perfil'), movimentos=movimentos, pendentes=pendentes, inv_items=inv_items, setores=setores, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, em_reparacao=em_reparacao)
+    return render_template_string(MAIN_TEMPLATE, msg=msg, username=session['username'], perfil=session.get('perfil'), movimentos=movimentos, pendentes=pendentes, inv_items=inv_items, setores=setores, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, em_reparacao=em_reparacao, meu_setor_id=setor_id, meu_setor_nome=meu_setor_nome)
 
 
 @app.route('/movimentos')
@@ -2916,7 +2951,15 @@ def registrar_saida():
     elif destino_raw.startswith("EXTERNO_"):
         origem_destino = "Externo - " + destino_raw.split("_", 1)[1]
         
-    setor_origem_id = session.get('setor_id')
+    # Origem: admin pode selecionar; nao-admin usa o setor do usuario
+    origem_raw = request.form.get('origem', '')
+    setor_origem_id = None
+    if origem_raw.startswith("SETOR_"):
+        setor_origem_id = int(origem_raw.split("_")[1])
+    else:
+        setor_origem_id = session.get('setor_id')
+    # Estado de saida
+    estado_saida = request.form.get('estado_saida', 'EM_PREPARACAO')
     qty_to_remove = int(request.form.get('quantidade', 1))
     
     inv_id = request.form.get('inventario_id')
@@ -2939,9 +2982,9 @@ def registrar_saida():
     guia = f"SAI-{datetime.now().year}-{len(c.execute('SELECT id FROM movimentos').fetchall())+1:04d}"
     status_movimento = "PENDENTE_RECEPCAO" if setor_destino_id else "Entregue"
     
-    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id) 
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia, "SAIDA", request.form['equipamento'], origem_destino, request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), status_movimento, None, request.form['numero_serie'], request.form.get('marca',''), request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), str(qty_to_remove), setor_origem_id, setor_destino_id))
+    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, estado_rastreio) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
+              (guia, "SAIDA", request.form['equipamento'], origem_destino, request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), status_movimento, None, request.form['numero_serie'], request.form.get('marca',''), request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), str(qty_to_remove), setor_origem_id, setor_destino_id, estado_saida))
     conn.commit()
     conn.close()
     flash("Saída registada com sucesso!")
