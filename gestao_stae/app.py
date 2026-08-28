@@ -2353,15 +2353,16 @@ def login():
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            c.execute("SELECT perfil, nome_completo, setor_id, eleitoral_local_id FROM users WHERE username=? AND password=?", (u, p))
+            c.execute("SELECT id, perfil, nome_completo, setor_id, eleitoral_local_id FROM users WHERE username=? AND password=?", (u, p))
             res = c.fetchone()
             conn.close()
             if res:
                 session['username'] = u
-                session['perfil'] = res[0]
-                session['nome_completo'] = res[1] or u
-                session['setor_id'] = res[2]
-                session['eleitoral_local_id'] = res[3]
+                session['user_id'] = res[0]
+                session['perfil'] = res[1]
+                session['nome_completo'] = res[2] or u
+                session['setor_id'] = res[3]
+                session['eleitoral_local_id'] = res[4]
                 return redirect(url_for('index'))
             else:
                 error_msg = f"<p style='color:red;'>Credenciais inválidas! BD: {'Nuvem' if is_cloud_mode() else 'Local'}<br>User digitado: '{u}'<br>Hash gerado: {p}</p>"
@@ -2935,7 +2936,7 @@ def registrar_saida():
               (guia, "SAIDA", request.form['equipamento'], origem_destino, request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), status_movimento, None, request.form['numero_serie'], request.form.get('marca',''), request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), str(qty_to_remove), setor_origem_id, setor_destino_id))
     conn.commit()
     conn.close()
-    flash("Sada registada com sucesso!")
+    flash("Saída registada com sucesso!")
     return redirect(url_for('index'))
 
 @app.route('/registrar_saida_reparacao/<original_guia>', methods=['POST'])
@@ -3992,7 +3993,7 @@ def confirmar_recepcao(guia):
         
         c.execute("UPDATE movimentos SET status='RECEBIDO' WHERE guia=?", (guia,))
         conn.commit()
-        flash(f"Receo confirmada para a guia {guia}!")
+        flash(f"Recepção confirmada para a guia {guia}!")
     conn.close()
     return redirect(url_for('index'))
 

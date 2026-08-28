@@ -62,13 +62,14 @@ def dual_execute(s_conn, pg_conn, sqlite_sql, pg_sql, params_sqlite, params_pg=N
 def check_permission():
     if 'username' not in session:
         return False
-    # Para já, permitir Admin. Mais tarde, ajustar conforme as permissões no perfil.
-    # O utilizador indicou "admin, mas a gestao de perfis pode tambem dar permissoes nao admin"
     perfil = session.get('perfil', '').lower()
-    # Adicionar lógica de verificação se necessário
     if perfil == 'admin':
         return True
-    return True # Temporariamente aberto para evitar bloqueios, refinar depois
+    # Outros perfis (técnico, protecção, etc.) apenas se tiverem um local
+    # eleitoral atribuído — condizente com users.eleitoral_local_id.
+    if session.get('eleitoral_local_id'):
+        return True
+    return False
 
 @eleitoral_bp.before_request
 def before_request():
@@ -252,7 +253,7 @@ def encerrar_processo(id):
     conn, is_pg = get_eleitoral_db()
     c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
     try:
-        utilizador_id = 1 # TODO: get from session properly
+        utilizador_id = session.get('user_id') or 1
         
         # Inserir transferencia
         if is_pg:
