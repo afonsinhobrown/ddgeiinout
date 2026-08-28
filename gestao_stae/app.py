@@ -581,7 +581,7 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
 
         <div id="ent" class="card hidden">
             <h3>Nova Entrada</h3>
-            <form method="POST" action="/registrar_entrada">
+            <form method="POST" action="/registrar_entrada" enctype="multipart/form-data">
                 <div class="form-grid">
                     <div><label>Equipamento (Tipo)</label>
                         <select name="equipamento" required>
@@ -616,6 +616,14 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                         </select>
                     </div>
                     <div><label>Quantidade</label><input name="quantidade" type="number" min="1" value="1" required></div>
+                    <div>
+                        <label>Código de Barras (opcional - scan)</label>
+                        <input name="codigo_barras" placeholder="Escanear ou digitar código de barras...">
+                    </div>
+                    <div>
+                        <label>Documento do Equipamento (imagem → PDF)</label>
+                        <input type="file" name="documento" accept=".jpg,.jpeg,.png,.bmp,.webp,.tif,.tiff,.pdf">
+                    </div>
                     <div style="grid-column: span 2;">
                         <label>Motivo</label>
                         <select name="motivo" required>
