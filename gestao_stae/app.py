@@ -14,6 +14,30 @@ import hashlib
 import io
 import psycopg2
 import socket
+from PIL import Image
+
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'documentos')
+if not os.path.exists(UPLOAD_FOLDER):
+    try: os.makedirs(UPLOAD_FOLDER)
+    except Exception: pass
+
+def imagem_para_pdf(f, nome_base):
+    """Converte imagem anexada para PDF e devolve o nome do ficheiro criado (ou None)."""
+    try:
+        img = Image.open(f)
+        img = img.convert('RGB')
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.lib.pagesizes import A4 as _A4
+        nome = f"{nome_base}.pdf"
+        caminho = os.path.join(UPLOAD_FOLDER, nome)
+        w_px, h_px = img.size
+        c = _canvas.Canvas(caminho, pagesize=_A4)
+        c.drawImage(ImageReader(img), 0, 0, width=_A4[0], height=_A4[1], preserveAspectRatio=True, anchor='c')
+        c.save()
+        return nome
+    except Exception as e:
+        print(f"[-] Erro ao converter imagem para PDF: {e}")
+        return None
 
 def generate_guia(tipo, cursor):
     # Try to get MACHINE_ID from environment, fallback to hostname hash
@@ -222,14 +246,32 @@ def check_db_integrity(c):
         if 'quantidade' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN quantidade TEXT")
         if 'setor_origem_id' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN setor_origem_id INTEGER")
         if 'setor_destino_id' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN setor_destino_id INTEGER")
+        if 'codigo_barras' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN codigo_barras TEXT")
+        if 'documento_pdf' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN documento_pdf TEXT")
+        if 'provincia_origem_id' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN provincia_origem_id INTEGER")
+        if 'provincia_destino_id' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN provincia_destino_id INTEGER")
+        if 'local_origem' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN local_origem TEXT")
+        if 'local_destino' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN local_destino TEXT")
+        if 'estado_rastreio' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN estado_rastreio TEXT")
+        if 'confirmado_destino' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN confirmado_destino TEXT")
+        
+        c.execute("PRAGMA table_info(inventario_local)")
+        inv_cols = [row[1] for row in c.fetchall()]
+        if 'codigo_barras' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN codigo_barras TEXT")
+        if 'documento_pdf' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN documento_pdf TEXT")
+        if 'provincia_id' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN provincia_id INTEGER")
+        if 'local_uso' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN local_uso TEXT")
+        if 'estado' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN estado TEXT")
+        if 'guia_origem' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN guia_origem TEXT")
         
         c.execute("PRAGMA table_info(users)")
         u_cols = [row[1] for row in c.fetchall()]
         if 'setor_id' not in u_cols: 
             c.execute("ALTER TABLE users ADD COLUMN setor_id INTEGER")
             c.execute("UPDATE users SET setor_id = 1 WHERE perfil != 'admin' AND setor_id IS NULL")
+        if 'provincia_id' not in u_cols: c.execute("ALTER TABLE users ADD COLUMN provincia_id INTEGER")
         
-        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material']
+        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material', 'equipamento_rastreio', 'equipamento_estado_historico']
         for t in tables:
             try:
                 c.execute(f"PRAGMA table_info({t})")
@@ -245,7 +287,7 @@ def check_db_integrity(c):
 
 def create_triggers(c):
     origem_padrao = os.environ.get("ORIGEM_CADASTRO") or "local"
-    tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material']
+    tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material', 'equipamento_rastreio', 'equipamento_estado_historico']
     for t in tables:
         c.execute(f'''
             CREATE TRIGGER IF NOT EXISTS tr_insert_{t}
@@ -291,7 +333,36 @@ def init_db():
         quantidade INTEGER DEFAULT 1,
         status TEXT DEFAULT 'Disponível',
         data_registo TEXT,
-        observacoes TEXT
+        observacoes TEXT,
+        codigo_barras TEXT,
+        documento_pdf TEXT,
+        provincia_id INTEGER,
+        local_uso TEXT,
+        estado TEXT,
+        guia_origem TEXT,
+        setor_id TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS equipamento_rastreio (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guia TEXT,
+        equipamento TEXT,
+        marca TEXT,
+        numero_serie TEXT,
+        estado TEXT,
+        local_atual TEXT,
+        observacoes TEXT,
+        data TEXT,
+        utilizador TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS equipamento_estado_historico (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guia TEXT,
+        equipamento TEXT,
+        numero_serie TEXT,
+        estado TEXT,
+        observacoes TEXT,
+        data TEXT,
+        utilizador TEXT
     )''')
     check_db_integrity(c)
     
@@ -494,6 +565,7 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
             <button onclick="show('sai')" class="btn btn-blue">📤 Saída</button>
             <a href="/inventario" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📦 Inventário DDGEI</a>
             <a href="/movimentos" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📋 Todos os Movimentos</a>
+            <button onclick="abrirBuscaBarcode()" class="btn btn-outline" style="background:#f1f5f9; color:#0f172a">🔍 Buscar por Código de Barras</button>
             {% if session.perfil == 'admin' %}
             <a href="/relatorios" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a"> 📊 Dashboard de Relatórios</a>
             <a href="/cadastros" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a"> 📝 Cadastros</a>
@@ -1038,6 +1110,78 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
             </form>
         </div>
     </div>
+
+    <!-- Modal de Busca por Código de Barras -->
+    <div id="barcodeModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1030; display:none; justify-content:center; align-items:center;">
+        <div class="card" style="width:600px; max-width:95%; max-height:90vh; overflow-y:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                <h3>🔍 Buscar Equipamento por Código de Barras</h3>
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('barcodeModal').style.display='none'" style="padding:0.4rem 0.8rem;">Fechar</button>
+            </div>
+            <div style="display:flex; gap:0.5rem; margin-bottom:1rem;">
+                <input type="text" id="barcodeInput" placeholder="Escanear ou digitar o código de barras..." style="flex:1; padding:0.7rem; border:1px solid #cbd5e1; border-radius:4px;" autofocus>
+                <button class="btn btn-blue" onclick="buscarBarcode()" style="padding:0.7rem 1.2rem;">Buscar</button>
+            </div>
+            <div id="barcode_result"></div>
+        </div>
+    </div>
+
+    <script>
+        function abrirBuscaBarcode() {
+            document.getElementById('barcodeModal').style.display = 'flex';
+            var inp = document.getElementById('barcodeInput');
+            inp.value = '';
+            inp.focus();
+        }
+        function buscarBarcode() {
+            var codigo = document.getElementById('barcodeInput').value.trim();
+            if (!codigo) { alert('Digite ou escaneie um código de barras.'); return; }
+            var box = document.getElementById('barcode_result');
+            box.innerHTML = '<div style="color:#64748b;">A pesquisar...</div>';
+            fetch('/api/buscar_barcode?codigo=' + encodeURIComponent(codigo))
+                .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+                .then(function(res){
+                    if (!res.ok) { box.innerHTML = '<div style="color:#dc2626; background:#fee2e2; padding:1rem; border-radius:0.5rem;">' + (res.j.error || 'Equipamento não encontrado.') + '</div>'; return; }
+                    var it = res.j.item, t = res.j.tipo;
+                    var guia = it.guia || ('INV-' + it.id);
+                    var html = '<div style="border:1px solid var(--border); border-radius:0.5rem; padding:1rem;">';
+                    html += '<h4 style="margin-top:0;">' + (it.equipamento||'') + (it.marca ? ' (' + it.marca + ')' : '') + '</h4>';
+                    html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem 1rem; font-size:0.9rem; margin-top:0.75rem;">';
+                    html += '<div><strong>S/N:</strong> ' + (it.numero_serie||'-') + '</div>';
+                    html += '<div><strong>Qtd:</strong> ' + (it.quantidade||'-') + '</div>';
+                    html += '<div><strong>Tipo:</strong> ' + t + '</div>';
+                    html += '<div><strong>Status:</strong> ' + (it.status||'-') + '</div>';
+                    html += '<div><strong>Estado:</strong> ' + ((it.estado||it.estado_rastreio||'-').replace(/_/g,' ')) + '</div>';
+                    html += '<div><strong>Guia:</strong> ' + guia + '</div>';
+                    html += '</div>';
+                    html += '<div style="margin-top:1rem;"><button class="btn btn-outline" onclick="buscarBarcodeRastreio(\'' + guia + '\')">📦 Ver Rastreio</button></div>';
+                    html += '<div id="barcode_rastreio" style="margin-top:0.75rem;"></div>';
+                    html += '</div>';
+                    box.innerHTML = html;
+                })
+                .catch(function(e){ box.innerHTML = '<div style="color:#dc2626;">Erro de ligação.</div>'; });
+        }
+        function buscarBarcodeRastreio(guia) {
+            var br = document.getElementById('barcode_rastreio');
+            br.innerHTML = '<div style="color:#64748b;">A carregar histórico...</div>';
+            fetch('/api/rastreio/' + encodeURIComponent(guia))
+                .then(function(r){ return r.json(); })
+                .then(function(rows){
+                    if (!rows || rows.length === 0) { br.innerHTML = '<div style="color:#64748b;">Sem histórico registado.</div>'; return; }
+                    var html = '<div style="border-top:1px solid var(--border); padding-top:0.75rem;"><strong>Histórico / Rastreio:</strong></div>';
+                    rows.forEach(function(ev){
+                        html += '<div style="border-left:3px solid #3b82f6; padding:0.5rem 0.75rem; background:#f8fafc; border-radius:0 0.375rem 0.375rem 0; margin-top:0.5rem;">';
+                        html += '<div style="display:flex; justify-content:space-between;"><strong style="text-transform:capitalize;">' + (ev.estado||'').replace(/_/g,' ') + '</strong><span style="font-size:0.75rem; color:#64748b;">' + (ev.data||'') + '</span></div>';
+                        html += (ev.local_atual ? '<div style="font-size:0.85rem; color:#475569;">📍 ' + ev.local_atual + '</div>' : '');
+                        html += (ev.observacoes ? '<div style="font-size:0.8rem; color:#64748b;">' + ev.observacoes + '</div>' : '');
+                        html += '<div style="font-size:0.75rem; color:#94a3b8;">por: ' + (ev.utilizador||'-') + '</div></div>';
+                    });
+                    br.innerHTML = html;
+                })
+                .catch(function(){ br.innerHTML = '<div style="color:#dc2626;">Erro ao carregar rastreio.</div>'; });
+        }
+        document.getElementById('barcodeInput').addEventListener('keydown', function(e){ if (e.key === 'Enter') { buscarBarcode(); } });
+    </script>
 </body></html>'''
 
 CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<title>Cadastros - STAE</title>
@@ -1422,10 +1566,113 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
         </div>
         {% endif %}
 
+        <!-- Provincial Pending Confirmation Panel -->
+        {% if provincias_pendentes %}
+        <div class="card" style="margin-bottom: 2rem; border: 2px solid #bfdbfe; background: #eff6ff;">
+            <h3 style="color: #1d4ed8; display: flex; align-items: center; gap: 0.5rem;">🚚 Receção Pendente entre Províncias</h3>
+            <div style="overflow-x: auto; margin-top: 1rem;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: #dbeafe; text-align: left; color: #1d4ed8; font-size: 0.8rem">
+                            <th style="padding: 0.75rem">EQUIPAMENTO</th>
+                            <th style="padding: 0.75rem">MARCA</th>
+                            <th style="padding: 0.75rem">S/N</th>
+                            <th style="padding: 0.75rem">QUANTIDADE</th>
+                            <th style="padding: 0.75rem">PROVÍNCIA DESTINO</th>
+                            <th style="padding: 0.75rem">ESTADO</th>
+                            <th style="padding: 0.75rem">GUIA</th>
+                            <th style="padding: 0.75rem; text-align: right;">AÇÕES</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for pp in provincias_pendentes %}
+                        <tr style="border-bottom: 1px solid #bfdbfe">
+                            <td style="padding: 0.75rem; font-weight: 600;">{{ pp.equipamento }}</td>
+                            <td style="padding: 0.75rem">{{ pp.marca }}</td>
+                            <td style="padding: 0.75rem; font-family: monospace;">{{ pp.numero_serie }}</td>
+                            <td style="padding: 0.75rem; font-weight: bold; text-align: center;">{{ pp.quantidade }}</td>
+                            <td style="padding: 0.75rem; color: #1e40af;">{{ pp.provincia_destino_nome or '-' }}</td>
+                            <td style="padding: 0.75rem; font-size: 0.8rem;">{{ (pp.estado or 'EM_PREPARACAO')|replace('_',' ') }}</td>
+                            <td style="padding: 0.75rem; font-family: monospace;">{{ pp.guia_origem or '-' }}</td>
+                            <td style="padding: 0.75rem; text-align: right;">
+                                <form method="POST" action="/confirmar_recepcao_provincia/{{ pp.id }}" style="display:inline;">
+                                    <button class="btn btn-green" style="margin-top:0; padding: 0.3rem 0.8rem; font-weight: bold; font-size: 0.8rem;">Confirmar Receção</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Movement between Provinces card -->
+        <div class="card" style="margin-bottom: 2rem;">
+            <h3 style="margin-bottom: 0.25rem;">🚚 Movimentar Equipamento entre Províncias</h3>
+            <form method="POST" action="/movimentar_provincia" style="margin-top: 1rem; display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem;">
+                <div>
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Província de Origem</label>
+                    <select name="provincia_origem_id" required style="margin-top: 0.25rem;">
+                        <option value="">-- Selecione --</option>
+                        {% for p in provincias %}<option value="{{p.id}}">{{p.nome}}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Província de Destino</label>
+                    <select name="provincia_destino_id" required style="margin-top: 0.25rem;">
+                        <option value="">-- Selecione --</option>
+                        {% for p in provincias %}<option value="{{p.id}}">{{p.nome}}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Local de Origem</label>
+                    <input name="local_origem" placeholder="Ex: Armazém Central" style="margin-top: 0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Local de Destino</label>
+                    <input name="local_destino" placeholder="Ex: Delegação Provincial" style="margin-top: 0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Equipamento</label>
+                    <input name="equipamento" placeholder="Tipo de equipamento" required style="margin-top: 0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Marca</label>
+                    <input name="marca" placeholder="Marca" style="margin-top: 0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Número de Série</label>
+                    <input name="numero_serie" placeholder="S/N" style="margin-top: 0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Quantidade</label>
+                    <input name="quantidade" type="number" min="1" value="1" style="margin-top: 0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Código de Barras (opcional)</label>
+                    <input name="codigo_barras" placeholder="Código de barras" style="margin-top: 0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Estado Inicial de Envio</label>
+                    <select name="estado" style="margin-top: 0.25rem;">
+                        {% for e in estados_intermedios %}<option value="{{e}}" {% if e == 'EM_PREPARACAO' %}selected{% endif %}>{{e.replace('_',' ')}}</option>{% endfor %}
+                    </select>
+                </div>
+                <div style="grid-column: span 2;">
+                    <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Motivo</label>
+                    <input name="motivo" placeholder="Motivo da movimentação" style="margin-top: 0.25rem;">
+                </div>
+                <div style="grid-column: span 4; display: flex; justify-content: flex-end;">
+                    <button class="btn btn-blue" style="margin-top:0; padding: 0.6rem 1.5rem; font-weight: bold;">Enviar para Província</button>
+                </div>
+            </form>
+        </div>
+
         <div style="display: grid; grid-template-columns: 350px 1fr; gap: 1.5rem; align-items: start;">
             <div class="card">
                 <h3>Cadastrar Equipamento</h3>
-                <form method="POST" action="/inventario/add" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+                <form method="POST" action="/inventario/add" enctype="multipart/form-data" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
                     <div>
                         <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Tipo de Equipamento</label>
                         <select name="equipamento" required style="margin-top: 0.25rem;">
@@ -1445,6 +1692,10 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                         <input name="numero_serie" placeholder="Ex: SN-12345 ou N/A" required style="margin-top: 0.25rem;">
                     </div>
                     <div>
+                        <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Código de Barras (opcional - scan)</label>
+                        <input name="codigo_barras" id="cadastro_codigo_barras" placeholder="Escanear ou digitar código de barras..." style="margin-top: 0.25rem;">
+                    </div>
+                    <div>
                         <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Quantidade</label>
                         <input name="quantidade" type="number" min="1" value="1" required style="margin-top: 0.25rem;">
                     </div>
@@ -1454,6 +1705,27 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                             <option value="">-- Selecione o Setor --</option>
                             {% for s in setores %}<option value="{{s.id}}" {% if session.setor_id == s.id %}selected{% endif %}>{{s.nome}}</option>{% endfor %}
                         </select>
+                    </div>
+                    <div>
+                        <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Província (opcional)</label>
+                        <select name="provincia_id" style="margin-top: 0.25rem;">
+                            <option value="">-- Selecione a Província --</option>
+                            {% for p in provincias %}<option value="{{p.id}}">{{p.nome}}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Local de Uso / Armazenamento</label>
+                        <input name="local_uso" placeholder="Ex: Armazém Central, Sala 2, ..." style="margin-top: 0.25rem;">
+                    </div>
+                    <div>
+                        <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Estado Intermédio (opcional)</label>
+                        <select name="estado" style="margin-top: 0.25rem;">
+                            {% for e in estados_intermedios %}<option value="{{e}}" {% if e == 'EM_ESTOQUE' %}selected{% endif %}>{{e.replace('_',' ')}}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Documento do Equipamento (imagem → PDF)</label>
+                        <input type="file" name="documento" accept=".jpg,.jpeg,.png,.bmp,.webp,.tif,.tiff,.pdf" style="margin-top: 0.25rem;">
                     </div>
                     <div>
                         <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Status Inicial</label>
@@ -1499,7 +1771,10 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                             <th style="padding:0.75rem">S/N</th>
                             <th style="padding:0.75rem">QUANTIDADE</th>
                             <th style="padding:0.75rem">SETOR</th>
+                            <th style="padding:0.75rem">PROVÍNCIA</th>
+                            <th style="padding:0.75rem">ESTADO</th>
                             <th style="padding:0.75rem">STATUS</th>
+                            <th style="padding:0.75rem">DOC</th>
                             <th style="padding:0.75rem; text-align: right;">ACÇÕES</th>
                         </tr>
                     </thead>
@@ -1680,6 +1955,49 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
         </div>
     </div>
 
+    <!-- Modal de Estado Intermédio -->
+    <div id="estadoModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1020; display:none; justify-content:center; align-items:center;">
+        <div class="card" style="width:450px; max-width:90%;">
+            <h3>🔄 Mudar Estado do Equipamento</h3>
+            <div style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1rem;">
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Equipamento (Guia)</label>
+                    <input type="text" id="ee_guia" readonly style="background:#f1f5f9; color:#475569;">
+                </div>
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Novo Estado Intermédio</label>
+                    <select id="ee_estado">
+                        {% for e in estados_intermedios %}<option value="{{e}}">{{e.replace('_',' ')}}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Local Atual</label>
+                    <input type="text" id="ee_local" placeholder="Ex: Embalagem, Transporte, Armazém..." style="margin-top:0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Observações (opcional)</label>
+                    <input type="text" id="ee_obs" placeholder="Detalhes..." style="margin-top:0.25rem;">
+                </div>
+                <div style="display:flex; gap:1rem; margin-top:0.5rem;">
+                    <button type="button" class="btn btn-outline" style="flex:1" onclick="document.getElementById('estadoModal').style.display='none'">Cancelar</button>
+                    <button type="button" class="btn btn-blue" style="flex:1" onclick="guardarEstado()">Guardar Estado</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Rastreio -->
+    <div id="rastreioModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1020; display:none; justify-content:center; align-items:center;">
+        <div class="card" style="width:600px; max-width:95%; max-height:90vh; overflow-y:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                <h3>📦 Histórico / Rastreio do Equipamento</h3>
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('rastreioModal').style.display='none'" style="padding:0.4rem 0.8rem;">Fechar</button>
+            </div>
+            <div id="rastreio_content" style="display:flex; flex-direction:column; gap:0.75rem;">
+            </div>
+        </div>
+    </div>
+
     <script>
         const allItems = {{ items|tojson }};
         let filteredItems = [...allItems];
@@ -1706,7 +2024,7 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
             const pageItems = filteredItems.slice(startIdx, endIdx);
             
             if (pageItems.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="8" style="padding:1.5rem; text-align:center; color:#64748b;">Nenhum equipamento correspondente encontrado.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="11" style="padding:1.5rem; text-align:center; color:#64748b;">Nenhum equipamento correspondente encontrado.</td></tr>`;
             } else {
                 pageItems.forEach(item => {
                     let statusSpan = '';
@@ -1718,10 +2036,17 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                         statusSpan = `<span style="background:#fee2e2; color:#991b1b; padding:0.25rem 0.5rem; border-radius:0.25rem; font-size:0.8rem; font-weight:600;">${item.status}</span>`;
                     }
                     
+                    const estadoLabel = (item.estado || 'EM_ESTOQUE').replace(/_/g, ' ');
+                    const estadoSpan = `<span style="background:#e2e8f0; color:#334155; padding:0.25rem 0.5rem; border-radius:0.25rem; font-size:0.75rem; font-weight:600;">${estadoLabel}</span>`;
+                    
                     const isChecked = selectedIds.has(item.id) ? 'checked' : '';
                     const actionSaida = (item.quantidade > 0 && item.status === 'Disponível') 
                         ? `<button onclick="abrirSaidaRapidaInventario(${item.id})" class="btn btn-green" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;">Saída</button>` 
                         : '';
+                    const docLink = item.documento_pdf 
+                        ? `<a href="/documentos/${item.documento_pdf}" target="_blank" title="Ver documento" style="text-decoration:none;">📄</a>` 
+                        : '-';
+                    const guiaExib = item.guia_origem || ('INV-' + item.id);
                         
                     const tr = document.createElement("tr");
                     tr.style.borderBottom = "1px solid var(--border)";
@@ -1732,9 +2057,14 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                         <td style="padding:0.75rem; font-family: monospace;">${item.numero_serie}</td>
                         <td style="padding:0.75rem; text-align: center; font-weight: bold;">${item.quantidade}</td>
                         <td style="padding:0.75rem; color:#475569;">${item.setor_nome || '-'}</td>
+                        <td style="padding:0.75rem; color:#1e40af;">${item.provincia_nome || '-'}</td>
+                        <td style="padding:0.75rem">${estadoSpan}</td>
                         <td style="padding:0.75rem">${statusSpan}</td>
-                        <td style="padding:0.75rem; text-align: right; display:flex; gap:0.25rem; justify-content: flex-end; align-items: center;">
+                        <td style="padding:0.75rem; text-align:center;">${docLink}</td>
+                        <td style="padding:0.75rem; text-align: right; display:flex; gap:0.25rem; justify-content: flex-end; align-items: center; flex-wrap: wrap;">
                             ${actionSaida}
+                            <button onclick="abrirEstadoModal(${item.id}, '${guiaExib}')" class="btn btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;" title="Mudar estado intermédio">Estado</button>
+                            <button onclick="verRastreio(${item.id}, 'inventario')" class="btn btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;" title="Ver histórico/rastreio">Rastreio</button>
                             <button onclick="editarItemInventario(${item.id})" class="btn btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;">Editar</button>
                             <form method="POST" action="/inventario/delete/${item.id}" style="display:inline;" onsubmit="return confirm('Deseja remover este item do inventário?');">
                                 <button class="btn btn-danger" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;">Remover</button>
@@ -1937,6 +2267,74 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
 
         // Initial table load
         renderTable();
+
+        // ---- Estado intermédio ----
+        let estadoCurrentId = null;
+        let estadoCurrentTipo = null;
+
+        function abrirEstadoModal(id, guia) {
+            estadoCurrentId = id;
+            estadoCurrentTipo = 'inventario';
+            document.getElementById('ee_guia').value = guia || ('INV-' + id);
+            document.getElementById('ee_local').value = '';
+            document.getElementById('ee_obs').value = '';
+            document.getElementById('estadoModal').style.display = 'flex';
+        }
+
+        function guardarEstado() {
+            const estado = document.getElementById('ee_estado').value;
+            const local = document.getElementById('ee_local').value;
+            const obs = document.getElementById('ee_obs').value;
+            if (!estado) { alert('Selecione um estado.'); return; }
+            fetch('/api/inventario/estado', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: estadoCurrentId, estado: estado, local_atual: local, obs: obs })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (res.success) {
+                    document.getElementById('estadoModal').style.display = 'none';
+                    window.location.reload();
+                } else {
+                    alert('Erro: ' + (res.error || 'Ocorreu um erro.'));
+                }
+            });
+        }
+
+        // ---- Rastreio ----
+        function verRastreio(id, tipo) {
+            const guia = (tipo === 'inventario') ? ('INV-' + id) : id;
+            const item = allItems.find(x => x.id === id);
+            const guiaReal = (item && item.guia_origem) ? item.guia_origem : guia;
+            document.getElementById('rastreio_content').innerHTML = '<div style="color:#64748b;">A carregar histórico...</div>';
+            document.getElementById('rastreioModal').style.display = 'flex';
+            fetch(`/api/rastreio/${encodeURIComponent(guiaReal)}`)
+                .then(r => r.json())
+                .then(rows => {
+                    const box = document.getElementById('rastreio_content');
+                    if (!rows || rows.length === 0) {
+                        box.innerHTML = '<div style="color:#64748b; text-align:center; padding:1rem;">Sem histórico registado para esta guia.</div>';
+                        return;
+                    }
+                    let html = '';
+                    rows.forEach(ev => {
+                        html += `<div style="border-left: 3px solid #3b82f6; padding: 0.5rem 0.75rem; background: #f8fafc; border-radius: 0 0.375rem 0.375rem 0;">
+                            <div style="display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+                                <strong style="color:#1e293b; text-transform:capitalize;">${(ev.estado||'').replace(/_/g,' ')}</strong>
+                                <span style="font-size:0.75rem; color:#64748b;">${ev.data || ''}</span>
+                            </div>
+                            <div style="font-size:0.85rem; color:#475569; margin-top:0.25rem;">${ev.local_atual ? '📍 ' + ev.local_atual : ''}</div>
+                            ${ev.observacoes ? '<div style="font-size:0.8rem; color:#64748b; margin-top:0.25rem;">' + ev.observacoes + '</div>' : ''}
+                            <div style="font-size:0.75rem; color:#94a3b8; margin-top:0.25rem;">por: ${ev.utilizador || '-'}</div>
+                        </div>`;
+                    });
+                    box.innerHTML = html;
+                })
+                .catch(err => {
+                    document.getElementById('rastreio_content').innerHTML = '<div style="color:#dc2626;">Erro ao carregar rastreio.</div>';
+                });
+        }
     </script>
 </body></html>'''
 
@@ -2237,6 +2635,211 @@ def api_equipamentos_reparacao():
     conn.close()
     return jsonify(data)
 
+@app.route('/documentos/<path:nome>')
+def servir_documento(nome):
+    if 'username' not in session: return redirect(url_for('login'))
+    nome = os.path.basename(nome)
+    caminho = os.path.join(UPLOAD_FOLDER, nome)
+    if not os.path.exists(caminho):
+        return "Documento não encontrado", 404
+    return send_file(caminho, mimetype='application/pdf')
+
+@app.route('/api/buscar_barcode')
+def api_buscar_barcode():
+    if 'username' not in session: return jsonify({'error': 'Não logado'}), 401
+    codigo = request.args.get('codigo', '').strip()
+    if not codigo:
+        return jsonify({'error': 'Código de barras vazio'}), 400
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, i.codigo_barras, i.local_uso, i.estado, s.nome as setor_nome 
+                 FROM inventario_local i LEFT JOIN setores s ON i.setor_id = s.id 
+                 WHERE i.codigo_barras = ?''', (codigo,))
+    cols = [d[0] for d in c.description]
+    row = c.fetchone()
+    if row:
+        conn.close()
+        return jsonify({'tipo': 'inventario', 'item': dict(zip(cols, row))})
+    c.execute("SELECT guia, tipo, equipamento, marca, numero_serie, quantidade, status, origem_destino, data, estado_rastreio, documento_pdf FROM movimentos WHERE codigo_barras = ? ORDER BY id DESC", (codigo,))
+    cols2 = [d[0] for d in c.description]
+    row2 = c.fetchone()
+    conn.close()
+    if row2:
+        return jsonify({'tipo': 'movimento', 'item': dict(zip(cols2, row2))})
+    return jsonify({'error': 'Nenhum equipamento encontrado com esse código de barras'}), 404
+
+@app.route('/api/movimento/estado', methods=['POST'])
+def api_movimento_estado():
+    if 'username' not in session: return jsonify({'error': 'Não logado'}), 401
+    data = request.get_json() or {}
+    guia = data.get('guia')
+    estado = data.get('estado')
+    obs = data.get('obs', '')
+    if not guia or not estado:
+        return jsonify({'error': 'Guia e estado são obrigatórios'}), 400
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE movimentos SET estado_rastreio=? WHERE guia=?", (estado, guia))
+    c.execute('''INSERT INTO equipamento_rastreio (guia, equipamento, numero_serie, estado, local_atual, observacoes, data, utilizador) 
+                 SELECT ?, equipamento, numero_serie, ?, ?, ?, ?, ? FROM movimentos WHERE guia=?''',
+              (guia, estado, data.get('local_atual', ''), obs, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session.get('nome_completo', session.get('username', '')), guia))
+    try:
+        c.execute('''INSERT INTO equipamento_estado_historico (guia, equipamento, numero_serie, estado, observacoes, data, utilizador) 
+                     SELECT ?, equipamento, numero_serie, ?, ?, ?, ? FROM movimentos WHERE guia=?''',
+                  (guia, estado, obs, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session.get('nome_completo', session.get('username', '')), guia))
+    except Exception:
+        pass
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'estado': estado})
+
+@app.route('/api/inventario/estado', methods=['POST'])
+def api_inventario_estado():
+    if 'username' not in session: return jsonify({'error': 'Não logado'}), 401
+    data = request.get_json() or {}
+    item_id = data.get('id')
+    estado = data.get('estado')
+    if not item_id or not estado:
+        return jsonify({'error': 'ID e estado são obrigatórios'}), 400
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE inventario_local SET estado=? WHERE id=?", (estado, item_id))
+    c.execute('''INSERT INTO equipamento_rastreio (guia, equipamento, numero_serie, estado, local_atual, observacoes, data, utilizador) 
+                 SELECT COALESCE(guia_origem, 'INV-' || ?), equipamento, numero_serie, ?, ?, ?, ?, ? FROM inventario_local WHERE id=?''',
+              (item_id, estado, data.get('local_atual', ''), data.get('obs', ''), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session.get('nome_completo', session.get('username', '')), item_id))
+    try:
+        c.execute('''INSERT INTO equipamento_estado_historico (guia, equipamento, numero_serie, estado, observacoes, data, utilizador) 
+                     SELECT COALESCE(guia_origem, 'INV-' || ?), equipamento, numero_serie, ?, ?, ?, ? FROM inventario_local WHERE id=?''',
+                  (item_id, estado, data.get('obs', ''), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session.get('nome_completo', session.get('username', '')), item_id))
+    except Exception:
+        pass
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'estado': estado})
+
+
+@app.route('/movimentar_provincia', methods=['POST'])
+def movimentar_provincia():
+    if 'username' not in session: return redirect(url_for('login'))
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    prov_origem_id = request.form.get('provincia_origem_id')
+    prov_destino_id = request.form.get('provincia_destino_id')
+    prov_origem = int(prov_origem_id) if prov_origem_id else None
+    prov_destino = int(prov_destino_id) if prov_destino_id else None
+    if not prov_origem or not prov_destino:
+        conn.close()
+        flash("Erro: selecione a província de origem e de destino.")
+        return redirect(url_for('inventario'))
+    if prov_origem == prov_destino:
+        conn.close()
+        flash("Erro: a província de origem e de destino devem ser diferentes.")
+        return redirect(url_for('inventario'))
+
+    def nome_prov(idp):
+        try:
+            r = c.execute("SELECT nome FROM eleitoral_provincia WHERE id=?", (idp,)).fetchone()
+            return r[0] if r else f"Província {idp}"
+        except Exception:
+            return f"Província {idp}"
+
+    nome_origem = nome_prov(prov_origem)
+    nome_destino = nome_prov(prov_destino)
+
+    equipamento = request.form.get('equipamento', '')
+    marca = request.form.get('marca', '')
+    numero_serie = request.form.get('numero_serie', '')
+    quantidade = int(request.form.get('quantidade', 1) or 1)
+    motivo = request.form.get('motivo', '')
+    inv_id = request.form.get('inventario_id')
+    codigo_barras = request.form.get('codigo_barras', '').strip()
+    guia = f"TRANSF-{datetime.now().year}-{len(c.execute('SELECT id FROM movimentos').fetchall())+1:04d}"
+    estado = request.form.get('estado', 'EM_PREPARACAO') or 'EM_PREPARACAO'
+
+    # valida stock e decrementa na origem se vier do inventário
+    if inv_id:
+        c.execute("SELECT quantidade FROM inventario_local WHERE id=?", (inv_id,))
+        r = c.fetchone()
+        if r and int(r[0]) >= quantidade:
+            novo = int(r[0]) - quantidade
+            ns = 'Disponvel' if novo > 0 else 'Indisponvel'
+            c.execute("UPDATE inventario_local SET quantidade=?, status=?, estado=? WHERE id=?", (novo, ns, estado, inv_id))
+        else:
+            conn.close()
+            flash("Erro: quantidade excede o stock disponível na origem.")
+            return redirect(url_for('inventario'))
+
+    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, numero_serie, marca, quantidade, setor_origem_id, setor_destino_id, provincia_origem_id, provincia_destino_id, local_origem, local_destino, estado_rastreio, codigo_barras, documento_pdf) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+              (guia, "TRANSFERENCIA", equipamento, f"{nome_origem} -> {nome_destino}", motivo, datetime.now().strftime("%Y-%m-%d"), "PENDENTE_RECEPCAO", session.get('nome_completo', session.get('username', 'tecnico')), numero_serie, marca, str(quantidade), None, None, prov_origem, prov_destino, request.form.get('local_origem', ''), request.form.get('local_destino', ''), estado, codigo_barras, None))
+
+    # regista no inventário do destino como pendente (não disponível até confirmar)
+    c.execute("SELECT id, quantidade FROM inventario_local WHERE provincia_id=? AND equipamento=? AND numero_serie=? AND marca=?", (prov_destino, equipamento, numero_serie, marca))
+    inv_dest = c.fetchone()
+    if inv_dest:
+        c.execute("UPDATE inventario_local SET quantidade=quantidade+?, status='Pendente', estado=?, guia_origem=? WHERE id=?", (quantidade, estado, guia, inv_dest[0]))
+    else:
+        c.execute("INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, provincia_id, estado, guia_origem, codigo_barras, local_uso) VALUES (?,?,?,?,'Pendente',?,?,?,?,?,?,?)",
+                  (equipamento, marca, numero_serie, quantidade, datetime.now().strftime("%Y-%m-%d"), request.form.get('local_destino', ''), prov_destino, estado, guia, codigo_barras, request.form.get('local_destino', '')))
+
+    # histórico de rastreio
+    c.execute('''INSERT INTO equipamento_rastreio (guia, equipamento, numero_serie, estado, local_atual, observacoes, data, utilizador) VALUES (?,?,?,?,?,?,?,?)''',
+              (guia, equipamento, numero_serie, estado, request.form.get('local_origem', ''), f"Enviado de {nome_origem} para {nome_destino}. Motivo: {motivo}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session.get('nome_completo', session.get('username', ''))))
+    # histórico de estados intermédios
+    try:
+        c.execute('''INSERT INTO equipamento_estado_historico (guia, equipamento, numero_serie, estado, observacoes, data, utilizador) VALUES (?,?,?,?,?,?,?)''',
+                  (guia, equipamento, numero_serie, estado, f"Enviado de {nome_origem} para {nome_destino}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session.get('nome_completo', session.get('username', ''))))
+    except Exception:
+        pass
+    conn.commit()
+    conn.close()
+    flash("Equipamento movimentado entre províncias! Aguarda confirmação no destino.")
+    return redirect(url_for('inventario'))
+
+
+@app.route('/confirmar_recepcao_provincia/<int:item_id>', methods=['POST'])
+def confirmar_recepcao_provincia(item_id):
+    if 'username' not in session: return redirect(url_for('login'))
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT equipamento, marca, numero_serie, quantidade, provincia_id, estado, guia_origem FROM inventario_local WHERE id=? AND status='Pendente'", (item_id,))
+    inv = c.fetchone()
+    if inv:
+        equipamento, marca, numero_serie, quantidade, provincia_id, estado, guia = inv
+        c.execute("SELECT id, quantidade FROM inventario_local WHERE provincia_id=? AND equipamento=? AND numero_serie=? AND marca=? AND id != ?", (provincia_id, equipamento, numero_serie, marca, item_id))
+        existing = c.fetchone()
+        if existing:
+            c.execute("UPDATE inventario_local SET quantidade=quantidade+?, status='Disponvel', estado='EM_ESTOQUE' WHERE id=?", (quantidade, existing[0]))
+            c.execute("DELETE FROM inventario_local WHERE id=?", (item_id,))
+        else:
+            c.execute("UPDATE inventario_local SET status='Disponvel', estado='EM_ESTOQUE', guia_origem=NULL WHERE id=?", (item_id,))
+        if guia:
+            c.execute("UPDATE movimentos SET status='RECEBIDO', estado_rastreio='RECEBIDO', confirmado_destino=? WHERE guia=?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), guia))
+            c.execute('''INSERT INTO equipamento_rastreio (guia, equipamento, numero_serie, estado, local_atual, observacoes, data, utilizador) VALUES (?,?,?,?,?,?,?,?)''',
+                      (guia, equipamento, numero_serie, 'RECEBIDO', 'Destino', 'Receção confirmada no destino. Quantidade atualizada.', datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session.get('nome_completo', session.get('username', ''))))
+            try:
+                c.execute('''INSERT INTO equipamento_estado_historico (guia, equipamento, numero_serie, estado, observacoes, data, utilizador) VALUES (?,?,?,?,?,?,?)''',
+                          (guia, equipamento, numero_serie, 'RECEBIDO', 'Receção confirmada no destino', datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session.get('nome_completo', session.get('username', ''))))
+            except Exception:
+                pass
+        conn.commit()
+        flash("Receção confirmada no destino! Quantidade atualizada.")
+    conn.close()
+    return redirect(url_for('inventario'))
+
+
+@app.route('/api/rastreio/<guia>')
+def api_rastreio(guia):
+    if 'username' not in session: return jsonify({'error': 'Não logado'}), 401
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, guia, equipamento, numero_serie, estado, local_atual, observacoes, data, utilizador FROM equipamento_rastreio WHERE guia=? ORDER BY id ASC", (guia,))
+    cols = [d[0] for d in c.description]
+    rows = [dict(zip(cols, r)) for r in c.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+
 @app.route('/api/update_status/<guia>', methods=['POST'])
 def api_update_status(guia):
     status = request.json.get('status')
@@ -2265,9 +2868,24 @@ def registrar_entrada():
     c = conn.cursor()
     guia = f"ENT-{datetime.now().year}-{len(c.execute('SELECT id FROM movimentos').fetchall())+1:04d}"
     
-    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id) 
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia, "ENTRADA", request.form['equipamento'], request.form['origem'], request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), "Em estoque", None, request.form['numero_serie'], request.form.get('marca',''), request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), request.form.get('quantidade', '1'), None, session.get('setor_id')))
+    codigo_barras = request.form.get('codigo_barras', '').strip()
+    documento_pdf = None
+    if 'documento' in request.files:
+        f = request.files['documento']
+        if f and f.filename:
+            ext = os.path.splitext(f.filename)[1].lower()
+            nome_base = f"ENT_DOC_{guia}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            if ext in ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'):
+                documento_pdf = imagem_para_pdf(f, nome_base)
+            elif ext == '.pdf':
+                nome = f"{nome_base}.pdf"
+                caminho = os.path.join(UPLOAD_FOLDER, nome)
+                f.save(caminho)
+                documento_pdf = nome
+    
+    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, codigo_barras, documento_pdf, estado_rastreio) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
+              (guia, "ENTRADA", request.form['equipamento'], request.form['origem'], request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), "Em estoque", None, request.form['numero_serie'], request.form.get('marca',''), request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), request.form.get('quantidade', '1'), None, session.get('setor_id'), codigo_barras, documento_pdf, 'EM_ESTOQUE'))
     conn.commit()
     conn.close()
     return redirect(url_for('index'))
@@ -3414,16 +4032,20 @@ def inventario():
     # Base query for inventory (excluding Pending which is shown in a separate panel)
     if is_admin:
         c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
-                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome 
+                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome,
+                            i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome, i.documento_pdf, i.guia_origem
                      FROM inventario_local i 
                      LEFT JOIN setores s ON i.setor_id = s.id 
+                     LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
                      WHERE i.status != 'Pendente'
                      ORDER BY i.id DESC''')
     else:
         c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
-                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome 
+                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome,
+                            i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome, i.documento_pdf, i.guia_origem
                      FROM inventario_local i 
                      LEFT JOIN setores s ON i.setor_id = s.id 
+                     LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
                      WHERE i.setor_id = ? AND i.status != 'Pendente'
                      ORDER BY i.id DESC''', (setor_id,))
                      
@@ -3433,20 +4055,34 @@ def inventario():
     # Load pending confirmation list for this sector (only for technicians) or all (admin)
     if is_admin:
         c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
-                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome, '' as guia_origem
+                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome, i.guia_origem,
+                            i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome
                      FROM inventario_local i 
                      LEFT JOIN setores s ON i.setor_id = s.id 
+                     LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
                      WHERE i.status = 'Pendente'
                      ORDER BY i.id DESC''')
     else:
         c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
-                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome, '' as guia_origem
+                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome, i.guia_origem,
+                            i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome
                      FROM inventario_local i 
                      LEFT JOIN setores s ON i.setor_id = s.id 
+                     LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
                      WHERE i.setor_id = ? AND i.status = 'Pendente'
                      ORDER BY i.id DESC''', (setor_id,))
     cols_p = [d[0] for d in c.description]
     pending_items = [dict(zip(cols_p, r)) for r in c.fetchall()]
+
+    # Pendentes de transferência ENTRE PROVÍNCIAS (confirmar receção no destino)
+    c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, i.guia_origem,
+                        i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_destino_nome
+                 FROM inventario_local i 
+                 LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
+                 WHERE i.status = 'Pendente' AND i.provincia_id IS NOT NULL
+                 ORDER BY i.id DESC''')
+    cols_pp = [d[0] for d in c.description]
+    provincias_pendentes = [dict(zip(cols_pp, r)) for r in c.fetchall()]
     
     # Calculate stats selectively based on user scope
     if is_admin:
@@ -3495,9 +4131,15 @@ def inventario():
     fornecedores = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM instituicoes")
     instituicoes = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
+    c.execute("SELECT id, nome FROM eleitoral_provincia ORDER BY nome")
+    provincias = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
+    estados_intermedios = [
+        'EM_ESTOQUE', 'EM_PREPARACAO', 'EMPACOTAMENTO',
+        'A_ESPERA_ENVIO', 'EM_TRANSITO', 'RECEBIDO', 'EM_USO', 'AVARIADO'
+    ]
     
     conn.close()
-    return render_template_string(INVENTARIO_TEMPLATE, items=items, pending_items=pending_items, stats=stats, setores=setores, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, msg=request.args.get('msg'))
+    return render_template_string(INVENTARIO_TEMPLATE, items=items, pending_items=pending_items, provincias_pendentes=provincias_pendentes, stats=stats, setores=setores, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, provincias=provincias, estados_intermedios=estados_intermedios, msg=request.args.get('msg'))
 
 @app.route('/inventario/add', methods=['POST'])
 def inventario_add():
@@ -3505,9 +4147,28 @@ def inventario_add():
     c = conn.cursor()
     setor_id = request.form.get('setor_id')
     setor_val = int(setor_id) if (setor_id and setor_id != '' and setor_id != 'None') else None
-    c.execute('''INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, setor_id) 
-                 VALUES (?,?,?,?,?,?,?,?)''', 
-              (request.form.get('equipamento'), request.form.get('marca'), request.form.get('numero_serie'), int(request.form.get('quantidade', 1)), request.form.get('status'), datetime.now().strftime("%Y-%m-%d"), request.form.get('observacoes', ''), setor_val))
+    
+    codigo_barras = request.form.get('codigo_barras', '').strip()
+    provincia_id = request.form.get('provincia_id')
+    prov_val = int(provincia_id) if (provincia_id and provincia_id != '' and provincia_id != 'None') else None
+    
+    documento_pdf = None
+    if 'documento' in request.files:
+        f = request.files['documento']
+        if f and f.filename:
+            ext = os.path.splitext(f.filename)[1].lower()
+            nome_base = f"INV_DOC_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            if ext in ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'):
+                documento_pdf = imagem_para_pdf(f, nome_base)
+            elif ext == '.pdf':
+                nome = f"{nome_base}.pdf"
+                caminho = os.path.join(UPLOAD_FOLDER, nome)
+                f.save(caminho)
+                documento_pdf = nome
+    
+    c.execute('''INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, setor_id, codigo_barras, documento_pdf, provincia_id, local_uso, estado) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
+              (request.form.get('equipamento'), request.form.get('marca'), request.form.get('numero_serie'), int(request.form.get('quantidade', 1)), request.form.get('status'), datetime.now().strftime("%Y-%m-%d"), request.form.get('observacoes', ''), setor_val, codigo_barras, documento_pdf, prov_val, request.form.get('local_uso', ''), request.form.get('estado', 'EM_ESTOQUE')))
     conn.commit()
     conn.close()
     return redirect(url_for('inventario', msg="Item adicionado ao inventário local!"))
@@ -3855,9 +4516,35 @@ def init_pg_db():
             last_modified VARCHAR DEFAULT '2026-06-24T00:00:00',
             origem_registo VARCHAR DEFAULT 'local'
         )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS equipamento_rastreio (
+            id SERIAL PRIMARY KEY,
+            guia VARCHAR,
+            equipamento VARCHAR,
+            marca VARCHAR,
+            numero_serie VARCHAR,
+            estado VARCHAR,
+            local_atual VARCHAR,
+            observacoes VARCHAR,
+            data VARCHAR,
+            utilizador VARCHAR,
+            last_modified VARCHAR DEFAULT '2026-06-24T00:00:00',
+            origem_registo VARCHAR DEFAULT 'local'
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS equipamento_estado_historico (
+            id SERIAL PRIMARY KEY,
+            guia VARCHAR,
+            equipamento VARCHAR,
+            numero_serie VARCHAR,
+            estado VARCHAR,
+            observacoes VARCHAR,
+            data VARCHAR,
+            utilizador VARCHAR,
+            last_modified VARCHAR DEFAULT '2026-06-24T00:00:00',
+            origem_registo VARCHAR DEFAULT 'local'
+        )''')
         
         # Ensure all columns exist in PostgreSQL (automatic migration)
-        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material']
+        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material', 'equipamento_rastreio', 'equipamento_estado_historico']
         
         # Create trigger function for PG
         try:
@@ -3943,7 +4630,9 @@ SYNC_CONFIG = {
     'eleitoral_processo_eleitoral': ['nome', 'ano'],
     'eleitoral_material_sobrante': ['processo_id', 'local_id', 'tipo_material_id'],
     'eleitoral_evento': ['processo_id', 'nome'],
-    'eleitoral_movimento_material': ['processo_id', 'local_origem_id', 'local_destino_id', 'data_envio']
+    'eleitoral_movimento_material': ['processo_id', 'local_origem_id', 'local_destino_id', 'data_envio'],
+    'equipamento_rastreio': ['guia', 'estado', 'data'],
+    'equipamento_estado_historico': ['guia', 'estado', 'data']
 }
 
 def get_table_columns(cursor, table_name, is_pg=False):
