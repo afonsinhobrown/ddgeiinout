@@ -7,6 +7,7 @@ from datetime import datetime
 from threading import Timer
 import threading
 from flask import Flask, render_template_string, request, redirect, url_for, jsonify, send_file, session, flash
+from werkzeug.security import generate_password_hash, check_password_hash
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -274,6 +275,7 @@ def check_db_integrity(c):
         ddgei_id = ddgei_row[0] if ddgei_row else 3
         c.execute("UPDATE users SET setor_id = ? WHERE setor_id IS NULL", (ddgei_id,))
         if 'provincia_id' not in u_cols: c.execute("ALTER TABLE users ADD COLUMN provincia_id INTEGER")
+        if 'permissoes_estado' not in u_cols: c.execute("ALTER TABLE users ADD COLUMN permissoes_estado TEXT")
         
         tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material', 'equipamento_rastreio', 'equipamento_estado_historico']
         for t in tables:
@@ -376,7 +378,7 @@ def init_db():
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
         for u, p, perf in [("admin", "admin123", "admin"), ("tecnico", "tecnico123", "tecnico"), ("protecao", "protecao123", "protecao")]:
-            c.execute("INSERT INTO users (username, password, perfil, nome_completo) VALUES (?,?,?,?)", (u, hashlib.md5(p.encode()).hexdigest(), perf, u))
+            c.execute("INSERT INTO users (username, password, perfil, nome_completo) VALUES (?,?,?,?)", (u, generate_password_hash(p), perf, u))
             
     # Populate default lookup values if empty
     c.execute("SELECT COUNT(*) FROM motivos")
@@ -769,6 +771,7 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                     <td style="padding:1rem">{{m.data[:10]}}<br><small style="color:#64748b">{{m.data[11:]}}</small></td>
                     <td style="padding:1rem">
                         <button onclick="toggleDetails('det_{{loop.index}}')" class="btn btn-outline" style="padding:0.3rem 0.6rem; font-size:0.8rem; margin-right:0.3rem;">Detalhes</button>
+                        <button onclick="mudarEstadoMov('{{m.guia}}','{{m.estado_rastreio or m.status or ''}}')" class="btn btn-outline" style="padding:0.3rem 0.6rem; font-size:0.8rem; margin-right:0.3rem;">Estado</button>
                         <a href="/ver_guia/{{m.guia}}" target="_blank" class="btn btn-outline" style="padding:0.3rem 0.6rem; font-size:0.8rem; margin-right:0.3rem">PDF</a>
                         {% if m.tipo == 'ENTRADA' and m.status and 'repara' in m.status|lower %}
                         <button onclick="abrirSaidaReparacao('{{m.guia}}')" class="btn btn-green" style="padding:0.3rem 0.6rem; font-size:0.8rem; margin-right:0.3rem">Saída</button>
@@ -1047,6 +1050,36 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
             document.getElementById('saidaReparacaoModal').style.display = 'none';
             window.location.reload();
         }
+        function mudarEstadoMov(guia, estadoAtual) {
+            document.getElementById('me_guia').value = guia;
+            document.getElementById('me_atual').value = estadoAtual;
+            document.getElementById('me_estado').value = estadoAtual;
+            document.getElementById('me_local').value = '';
+            document.getElementById('me_obs').value = '';
+            document.getElementById('movEstadoModal').style.display = 'flex';
+        }
+        function guardarEstadoMov(event) {
+            event.preventDefault();
+            const guia = document.getElementById('me_guia').value;
+            const estado = document.getElementById('me_estado').value;
+            const local = document.getElementById('me_local').value;
+            const obs = document.getElementById('me_obs').value;
+            fetch('/api/movimento/estado', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ guia: guia, estado: estado, local: local, obs: obs })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if(res.success) {
+                    document.getElementById('movEstadoModal').style.display = 'none';
+                    window.location.reload();
+                } else {
+                    alert(res.error || 'Erro ao atualizar o estado do movimento.');
+                }
+            })
+            .catch(() => alert('Erro de ligação. Tente novamente.'));
+        }
     </script>
     <div id="reparacaoModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; display:none; justify-content:center; align-items:center;">
         <div class="card" style="width:800px; max-width:95%; max-height:90vh; overflow-y:auto; position:relative;">
@@ -1142,6 +1175,45 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                     </div>
                 </div>
                 <button type="submit" class="btn btn-blue" style="margin-top:2rem; width:100%; padding:0.8rem; font-size:1.05rem; font-weight:bold;">CONFIRMAR SAÍDA E GERAR GUIA</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal de Alteração de Estado do Movimento -->
+    <div id="movEstadoModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1020; display:none; justify-content:center; align-items:center;">
+        <div class="card" style="width:480px; max-width:95%;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                <h3>🚚 Alterar Estado do Movimento</h3>
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('movEstadoModal').style.display='none'" style="padding:0.4rem 0.8rem;">Fechar</button>
+            </div>
+            <form onsubmit="guardarEstadoMov(event)">
+                <div>
+                    <label>Guia</label>
+                    <input type="text" id="me_guia" readonly style="background:#f1f5f9; font-weight:bold; color:#475569;">
+                </div>
+                <div>
+                    <label>Estado Atual</label>
+                    <input type="text" id="me_atual" readonly style="background:#f1f5f9; color:#475569;">
+                </div>
+                <div>
+                    <label>Novo Estado</label>
+                    <select id="me_estado" required>
+                        <option value="EM_PREPARACAO">Em Preparação</option>
+                        <option value="EMPACOTAMENTO">Empacotamento</option>
+                        <option value="A_ESPERA_ENVIO">À espera de envio</option>
+                        <option value="ENVIADO">Enviado</option>
+                        <option value="RECEBIDO">Recebido</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Local (Opcional)</label>
+                    <input type="text" id="me_local" placeholder="Localização atual">
+                </div>
+                <div>
+                    <label>Observações (Opcional)</label>
+                    <textarea id="me_obs" rows="2" placeholder="Observações..."></textarea>
+                </div>
+                <button type="submit" class="btn btn-blue" style="margin-top:1.5rem; width:100%; padding:0.8rem;">SALVAR ESTADO</button>
             </form>
         </div>
     </div>
@@ -1309,6 +1381,17 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         <option value="">Selecione o Local Eleitoral (Opcional - STAE)</option>
                         {% for l in eleitoral_locais %}<option value="{{l.id}}">{{l.tipo}} - {{l.nome}}</option>{% endfor %}
                     </select>
+                    <div style="margin-top:0.75rem; font-size:0.85rem; color:#64748b;">
+                        <strong>Permissões de Estados de Saída</strong><br>
+                        <small>Estados que este usuário pode marcar (vazio = regra por setor: origem marca envio, destino marca recebido).</small>
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
+                        <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;"><input type="checkbox" name="permissoes_estado" value="EM_PREPARACAO"> Preparação</label>
+                        <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;"><input type="checkbox" name="permissoes_estado" value="EMPACOTAMENTO"> Empacotamento</label>
+                        <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;"><input type="checkbox" name="permissoes_estado" value="A_ESPERA_ENVIO"> À espera de envio</label>
+                        <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;"><input type="checkbox" name="permissoes_estado" value="ENVIADO"> Enviado</label>
+                        <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;"><input type="checkbox" name="permissoes_estado" value="RECEBIDO"> Recebido</label>
+                    </div>
                     <button class="btn" style="background:#1e293b; color:white; margin-top:1rem; width:100%">Salvar Usuário</button>
                 </form>
                 <h4 style="margin-top:2rem">Usuários do Sistema</h4>
@@ -1318,10 +1401,11 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         <td style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
                             <div>
                                 <span style="font-weight: 600;">{{u.nome_completo}}</span><br>
-                                <small style="color:#64748b;">{{u.username}} ({{u.perfil}})</small>
+                                <small style="color:#64748b;">{{u.username}} ({{u.perfil}}){% if u.permissoes_estado %} · Estados: {{u.permissoes_estado|replace('_',' ')}}
+                                {% else %} · Estados: por setor{% endif %}</small>
                             </div>
                             <div style="display:flex; gap:0.25rem; align-items:center;">
-                                <button onclick="openEdit('/edit_user/{{u.id}}', 'Editar Usuário', [{label:'Nome Completo', name:'nome_completo', type:'text', value:'{{u.nome_completo}}', required:true}, {label:'Username', name:'username', type:'text', value:'{{u.username}}', required:true}, {label:'Perfil', name:'perfil', type:'select', value:'{{u.perfil}}', options:[{value:'admin',text:'Administrador'},{value:'tecnico',text:'Técnico'},{value:'protecao',text:'Protecção'}]}, {label:'Setor', name:'setor_id', type:'select', value:'{{u.setor_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for s in setores %}{value:'{{s.id}}',text:'{{s.nome}}'},{% endfor %}]}, {label:'Local Eleitoral', name:'eleitoral_local_id', type:'select', value:'{{u.eleitoral_local_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for l in eleitoral_locais %}{value:'{{l.id}}',text:'{{l.tipo}} - {{l.nome}}'},{% endfor %}]}, {label:'Nova Senha (Opcional)', name:'password', type:'password', value:'', required:false}])" class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem">Editar</button>
+                                <button onclick="openEdit('/edit_user/{{u.id}}', 'Editar Usuário', [{label:'Nome Completo', name:'nome_completo', type:'text', value:'{{u.nome_completo}}', required:true}, {label:'Username', name:'username', type:'text', value:'{{u.username}}', required:true}, {label:'Perfil', name:'perfil', type:'select', value:'{{u.perfil}}', options:[{value:'admin',text:'Administrador'},{value:'tecnico',text:'Técnico'},{value:'protecao',text:'Protecção'}]}, {label:'Setor', name:'setor_id', type:'select', value:'{{u.setor_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for s in setores %}{value:'{{s.id}}',text:'{{s.nome}}'},{% endfor %}]}, {label:'Local Eleitoral', name:'eleitoral_local_id', type:'select', value:'{{u.eleitoral_local_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for l in eleitoral_locais %}{value:'{{l.id}}',text:'{{l.tipo}} - {{l.nome}}'},{% endfor %}]}, {label:'Permissões de Estados de Saída', name:'permissoes_estado', type:'checkboxes', value:'{{u.permissoes_estado or ""}}', options:[{value:'EM_PREPARACAO',text:'Preparação'},{value:'EMPACOTAMENTO',text:'Empacotamento'},{value:'A_ESPERA_ENVIO',text:'À espera de envio'},{value:'ENVIADO',text:'Enviado'},{value:'RECEBIDO',text:'Recebido'}]}, {label:'Nova Senha (Opcional)', name:'password', type:'password', value:'', required:false}])" class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem">Editar</button>
                                 <form method="POST" action="/delete_user/{{u.id}}" style="display:inline;" onsubmit="return confirm('Tem certeza que deseja remover este usuário?');">
                                     <button class="btn btn-danger" style="padding:0.2rem 0.5rem; font-size:0.8rem">Remover</button>
                                 </form>
@@ -1486,6 +1570,15 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         html += `<option value="${o.value}" ${o.value==f.value?'selected':''}>${o.text}</option>`;
                     });
                     html += `</select>`;
+                    container.innerHTML += html;
+                } else if(f.type === 'checkboxes') {
+                    let html = `<label>${f.label}</label>`;
+                    const current = String(f.value || '').split(',').map(s=>s.trim()).filter(Boolean);
+                    f.options.forEach(o => {
+                        const checked = current.includes(o.value) ? 'checked' : '';
+                        html += `<label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;"><input type="checkbox" name="${f.name}" value="${o.value}" ${checked}> ${o.text}</label>`;
+                    });
+                    html += `<small style="color:#64748b;">Vazio = regra por setor (origem marca envio, destino marca recebido).</small>`;
                     container.innerHTML += html;
                 } else {
                     container.innerHTML += `<label>${f.label}</label><input type="${f.type}" name="${f.name}" value="${f.value}" ${f.required?'required':''} placeholder="${f.placeholder||''}">`;
@@ -2384,14 +2477,24 @@ def login():
     error_msg = ""
     if request.method == 'POST':
         u = request.form.get('username', '').strip()
-        p = hashlib.md5(request.form.get('password', '').encode()).hexdigest()
+        p = request.form.get('password', '')
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            c.execute("SELECT id, perfil, nome_completo, setor_id, eleitoral_local_id FROM users WHERE username=? AND password=?", (u, p))
+            c.execute("SELECT id, perfil, nome_completo, setor_id, eleitoral_local_id, password FROM users WHERE username=?", (u,))
             res = c.fetchone()
-            conn.close()
+            valid = False
             if res:
+                stored = res[5]
+                if stored and stored.startswith('pbkdf2:'):
+                    valid = check_password_hash(stored, p)
+                elif stored:
+                    valid = hashlib.md5(p.encode()).hexdigest() == stored
+                    if valid:
+                        c.execute("UPDATE users SET password=? WHERE id=?", (generate_password_hash(p), res[0]))
+                        conn.commit()
+            conn.close()
+            if valid:
                 session['username'] = u
                 session['user_id'] = res[0]
                 session['perfil'] = res[1]
@@ -2400,7 +2503,7 @@ def login():
                 session['eleitoral_local_id'] = res[4]
                 return redirect(url_for('index'))
             else:
-                error_msg = f"<p style='color:red;'>Credenciais inválidas! BD: {'Nuvem' if is_cloud_mode() else 'Local'}<br>User digitado: '{u}'<br>Hash gerado: {p}</p>"
+                error_msg = f"<p style='color:red;'>Credenciais inválidas! BD: {'Nuvem' if is_cloud_mode() else 'Local'}<br>User digitado: '{u}'</p>"
         except Exception as e:
             error_msg = f"<p style='color:red;'>Erro BD: {str(e)}</p>"
     
@@ -2427,6 +2530,7 @@ def check_permissions():
     admin_only_endpoints = [
         'cadastros', 'add_motivo', 'add_fornecedor', 'add_instituicao', 
         'add_marca', 'add_tipo', 'add_setor', 'add_funcionario', 'add_user',
+        'edit_user', 'delete_user',
         'relatorios', 'relatorios_export', 'eliminar_movimento'
     ]
     
@@ -2721,9 +2825,11 @@ def api_movimento_estado():
     obs = data.get('obs', '')
     if not guia or not estado:
         return jsonify({'error': 'Guia e estado são obrigatórios'}), 400
-        conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Controlo de permissoes: origem marca preparacao/empacotamento/espera/envio; destino marca recebido; admin qualquer
+    # Controlo de permissoes: admin pode qualquer estado; os demais usam as permissoes configuradas
+    # pelo admin no cadastro do usuario (permissoes_estado). Se vazio, regra por setor:
+    # origem marca preparacao/empacotamento/espera/envio; destino marca recebido.
     c.execute("SELECT setor_origem_id, setor_destino_id FROM movimentos WHERE guia=?", (guia,))
     mov = c.fetchone()
     if not mov:
@@ -2734,20 +2840,28 @@ def api_movimento_estado():
     is_admin = session.get('perfil') == 'admin'
     estados_origem = ['EM_PREPARACAO', 'EMPACOTAMENTO', 'A_ESPERA_ENVIO', 'ENVIADO']
     estados_destino = ['RECEBIDO']
+    c.execute("SELECT permissoes_estado FROM users WHERE id=?", (session.get('user_id'),))
+    up = c.fetchone()
+    user_perm = []
+    if up and up[0]:
+        user_perm = [s.strip() for s in up[0].split(',') if s.strip()]
     permitido = False
     if is_admin:
         permitido = True
-    elif estado in estados_origem and setor_origem_id == meu_setor:
-        permitido = True
-    elif estado in estados_destino and setor_destino_id == meu_setor:
-        permitido = True
+    elif user_perm:
+        permitido = estado in user_perm
+    else:
+        if estado in estados_origem and setor_origem_id == meu_setor:
+            permitido = True
+        elif estado in estados_destino and setor_destino_id == meu_setor:
+            permitido = True
     if not permitido:
         conn.close()
         return jsonify({'error': 'Sem permissao para alterar este estado'}), 403
     c.execute("UPDATE movimentos SET estado_rastreio=? WHERE guia=?", (estado, guia))
     c.execute('''INSERT INTO equipamento_rastreio (guia, equipamento, numero_serie, estado, local_atual, observacoes, data, utilizador) 
                  SELECT ?, equipamento, numero_serie, ?, ?, ?, ?, ? FROM movimentos WHERE guia=?''',
-              (guia, estado, data.get('local_atual', ''), obs, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session.get('nome_completo', session.get('username', '')), guia))
+              (guia, estado, data.get('local') or data.get('local_atual', ''), obs, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session.get('nome_completo', session.get('username', '')), guia))
     try:
         c.execute('''INSERT INTO equipamento_estado_historico (guia, equipamento, numero_serie, estado, observacoes, data, utilizador) 
                      SELECT ?, equipamento, numero_serie, ?, ?, ?, ? FROM movimentos WHERE guia=?''',
@@ -3055,8 +3169,8 @@ def cadastros():
     setores = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome, cargo, setor_id FROM funcionarios")
     funcs = [{'id':r[0], 'nome':r[1], 'cargo':r[2], 'setor_id':r[3]} for r in c.fetchall()]
-    c.execute("SELECT id, username, perfil, nome_completo, setor_id, eleitoral_local_id FROM users")
-    users_data = [{'id':r[0], 'username':r[1], 'perfil':r[2], 'nome_completo':r[3] or r[1], 'setor_id':r[4], 'eleitoral_local_id': r[5]} for r in c.fetchall()]
+    c.execute("SELECT id, username, perfil, nome_completo, setor_id, eleitoral_local_id, permissoes_estado FROM users")
+    users_data = [{'id':r[0], 'username':r[1], 'perfil':r[2], 'nome_completo':r[3] or r[1], 'setor_id':r[4], 'eleitoral_local_id': r[5], 'permissoes_estado': r[6] or ''} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM marcas")
     marcas = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM tipos_equipamento")
@@ -3180,13 +3294,13 @@ def add_funcionario():
 def add_user():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    pwd = hashlib.md5(request.form['password'].encode()).hexdigest()
     try:
         setor_val = request.form.get('setor_id')
         setor_val = int(setor_val) if (setor_val and setor_val != '' and setor_val != 'None') else None
         eleitoral_local_val = request.form.get('eleitoral_local_id')
         eleitoral_local_val = int(eleitoral_local_val) if (eleitoral_local_val and eleitoral_local_val != '' and eleitoral_local_val != 'None') else None
-        c.execute("INSERT INTO users (username, password, perfil, nome_completo, setor_id, eleitoral_local_id) VALUES (?,?,?,?,?,?)", (request.form['username'], pwd, request.form['perfil'], request.form.get('nome_completo'), setor_val, eleitoral_local_val))
+        permissoes = ','.join(request.form.getlist('permissoes_estado'))
+        c.execute("INSERT INTO users (username, password, perfil, nome_completo, setor_id, eleitoral_local_id, permissoes_estado) VALUES (?,?,?,?,?,?,?)", (request.form['username'], generate_password_hash(request.form['password']), request.form['perfil'], request.form.get('nome_completo'), setor_val, eleitoral_local_val, permissoes))
         conn.commit()
         msg = "Usuário adicionado com sucesso!"
     except:
@@ -3224,11 +3338,12 @@ def edit_user(id):
     setor_val = int(setor_id) if (setor_id and setor_id != '' and setor_id != 'None') else None
     eleitoral_local_id = request.form.get('eleitoral_local_id')
     eleitoral_local_val = int(eleitoral_local_id) if (eleitoral_local_id and eleitoral_local_id != '' and eleitoral_local_id != 'None') else None
+    permissoes = ','.join(request.form.getlist('permissoes_estado'))
     if pwd:
-        hashed = hashlib.md5(pwd.encode()).hexdigest()
-        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, password=?, setor_id=?, eleitoral_local_id=? WHERE id=?", (nome_completo, username, perfil, hashed, setor_val, eleitoral_local_val, id))
+        hashed = generate_password_hash(pwd)
+        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, password=?, setor_id=?, eleitoral_local_id=?, permissoes_estado=? WHERE id=?", (nome_completo, username, perfil, hashed, setor_val, eleitoral_local_val, permissoes, id))
     else:
-        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, setor_id=?, eleitoral_local_id=? WHERE id=?", (nome_completo, username, perfil, setor_val, eleitoral_local_val, id))
+        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, setor_id=?, eleitoral_local_id=?, permissoes_estado=? WHERE id=?", (nome_completo, username, perfil, setor_val, eleitoral_local_val, permissoes, id))
     
     # Check if we are updating our own profile, and if so, update the session
     c.execute("SELECT username FROM users WHERE id=?", (id,))
@@ -4053,6 +4168,22 @@ def confirmar_recepcao(guia):
     mov = c.fetchone()
     if mov:
         equipamento, marca, numero_serie, quantidade, setor_destino_id = mov
+        # Controlo de permissoes: so o destino (ou admin) pode confirmar rececao;
+        # se o admin restringiu os estados do usuário, também deve ter RECEBIDO.
+        if not (session.get('perfil') == 'admin' or session.get('setor_id') == setor_destino_id):
+            conn.close()
+            flash("Sem permissao para confirmar esta rececao.")
+            return redirect(url_for('index'))
+        if session.get('perfil') != 'admin':
+            c.execute("SELECT permissoes_estado FROM users WHERE id=?", (session.get('user_id'),))
+            up = c.fetchone()
+            user_perm = []
+            if up and up[0]:
+                user_perm = [s.strip() for s in up[0].split(',') if s.strip()]
+            if user_perm and 'RECEBIDO' not in user_perm:
+                conn.close()
+                flash("Sem permissao para confirmar esta rececao.")
+                return redirect(url_for('index'))
         # Check if already exists in dest
         c.execute("SELECT id, quantidade FROM inventario_local WHERE setor_id=? AND equipamento=? AND numero_serie=? AND marca=?", (setor_destino_id, equipamento, numero_serie, marca))
         inv = c.fetchone()
@@ -4063,7 +4194,7 @@ def confirmar_recepcao(guia):
             c.execute("INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, setor_id) VALUES (?,?,?,?,'Disponvel',?,?)",
                       (equipamento, marca, numero_serie, qty, datetime.now().strftime("%Y-%m-%d"), setor_destino_id))
         
-        c.execute("UPDATE movimentos SET status='RECEBIDO' WHERE guia=?", (guia,))
+        c.execute("UPDATE movimentos SET status='RECEBIDO', estado_rastreio='RECEBIDO', confirmado_destino=? WHERE guia=?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), guia))
         conn.commit()
         flash(f"Recepção confirmada para a guia {guia}!")
     conn.close()
@@ -4089,7 +4220,7 @@ def rejeitar_recepcao(guia):
                           (equipamento, marca, numero_serie, qty, datetime.now().strftime("%Y-%m-%d"), setor_origem_id))
         c.execute("UPDATE movimentos SET status='REJEITADO' WHERE guia=?", (guia,))
         conn.commit()
-        flash(f"Transferncia da guia {guia} foi rejeitada e o material devolvido ao inventrio de origem.")
+        flash(f"Transferência da guia {guia} foi rejeitada e o material devolvido ao inventário de origem.")
     conn.close()
     return redirect(url_for('index'))
 
@@ -4666,6 +4797,7 @@ def init_pg_db():
                 
         try:
             c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS setor_id INTEGER")
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS permissoes_estado VARCHAR")
             c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS setor_origem_id INTEGER")
             c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS setor_destino_id INTEGER")
         except Exception as ex:
@@ -4855,5 +4987,5 @@ if __name__ == '__main__':
         run_startup_sync()
         
     Timer(1.5, lambda: webbrowser.open('http://127.0.0.1:5000')).start()
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    app.run(host='127.0.0.1', port=5000, debug=os.environ.get('FLASK_DEBUG', '') == '1')
 

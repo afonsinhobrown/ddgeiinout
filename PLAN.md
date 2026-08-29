@@ -25,51 +25,52 @@ Duas áreas:
 
 O módulo eleitoral usa `dual_execute()` (em `routes_eleitoral.py`) para escrever **em SQLite E PostgreSQL simultaneamente** (falha de PG não bloqueia).
 
-## 3. Estado atual (2016-07-11 em diante)
+## 3. Estado atual (2026-08-29)
 
-Branch `main`, `git status` LIMPO, sem conflitos, sem trabalho não commitado. Últimos commits:
+Branch `main`. Últimos commits (do mais recente):
 
-- `5ce3824` fix: adaptador decimal e cores Excel
-- `cc717c6` feat: botão Export Excel na interface de material
-- `ca81ba5` feat: dual-write SQLite+PG para editar/apagar/importar Excel no eleitoral
-- `7c41216` feat: rotas do módulo eleitoral (processos/inventário)
-- `9f0832d` / `4b433eb` / `b597956` feat: suporte hybrid SQLite/PG e migração
+- `1d3f9f8` feat: controlo de permissoes na mudanca de estado (origem marca preparação/empacotamento/à espera de envio/enviado; destino marca recebido; admin qualquer)
+- `d3dd16b` docs: registar estado real do trabalho
+- `db31329` feat: desvincular do DDGEI — usuarios por local, origem automatica na saida, estados de saida, historico com origem/destino separados
+- `da7f5ae` fix: session user_id no login, refinamento de check_permission, acentos corrompidos
+- `8b410d1` feat: barcode, movimentacao entre provincias, estados intermédios, imagem->PDF
+- `5ce3824` a `b597956` anteriores (hybrid SQLite/PG, eleitoral, Excel)
 
-**Todos os ficheiros compilam.** App sobe com `python app.py` (ou `executar.bat`).
+**Working tree NÃO está limpo:** `gestao_stae/app.py` e `PLAN.md` modificados (ver secção 4/5 — trabalho do dia). Untracked: `gestao_stae/_fix2.py`, `gestao_stae/_fix_confirm.py` (scripts one-off — as alterações que preparavam já estão aplicadas no código; podem ser removidos ou mantidos como referência histórica).
+
+**Todos os ficheiros compilam.** App sobe com `python app.py` (ou `executar.bat`). Login testado (migração MD5→werkzeug automática em utilizadores legados), permissões por usuário e confirmação de receção testados via test client.
 
 ## 4. ESTADO DE IMPLEMENTAÇÃO (2026-08-29)
 
-### NOVO TRABALHO EM CURSO — Desvincular do DDGEI / Locais / Saída por local
+### Desvincular do DDGEI / Locais / Saída por local — FEITO E COMMITADO
 
 **Requisitos do utilizador (2026-08-29):**
-1. O sistema **não deve estar ligado ao DDGEI** — o inventário deve ser de **todos os locais** onde o equipamento é cadastrado.
-2. **Usuários associados a um lugar** — os usuários atuais devem ser associados ao local DDGEI.
+1. O sistema **não deve estar ligado ao DDGEI** — o inventário é de **todos os locais** onde o equipamento é cadastrado.
+2. **Usuários associados a um lugar** — usuários atuais associados ao local DDGEI (setor_id=3).
 3. **Saída de equipamento de um lugar para outro**:
-   - Deve ser feita pelo **usuário desse local** (origem = local do usuário, não selecionável).
+   - Feita pelo **usuário desse local** (origem = local do usuário, não selecionável).
    - Quando é **admin**, o local de origem **pode ser selecionado**.
-4. **Histórico de movimentos** deve mostrar **origem e destino separados** e mostrar **estado do equipamento**.
+4. **Histórico de movimentos** mostra **origem e destino separados** e **estado do equipamento**.
 5. **Estados de saída**: preparação, empacotamento, à espera de envio, enviado, recebido.
-6. **Admin configura quais usuários realizam essas ações**.
+6. **Admin configura quais usuários realizam essas ações** — implementado (ver abaixo).
 
-**Estado atual do código:**
-- `users` já tem `setor_id` (local). Os usuários atuais têm `setor_id=1` (RECENSEAMENTO E SUFRAGIO) — devem ser associados ao DDGEI (setor_id=3).
-- `inventario_local` já tem `setor_id` (local de armazenamento).
-- `movimentos` já tem `setor_origem_id`, `setor_destino_id`, `local_origem`, `local_destino`, `estado_rastreio`.
-- `registrar_saida` usa `session.get('setor_id')` como origem — já correto para não-admin.
-- Estados intermédios já existem: `EM_ESTOQUE`, `EM_PREPARACAO`, `EMPACOTAMENTO`, `A_ESPERA_ENVIO`, `EM_TRANSITO`, `RECEBIDO`, `EM_USO`, `AVARIADO`.
+**Feito e commitado (2026-08-29, commits `db31329`, `da7f5ae`, `1d3f9f8`):**
+- [x] **Usuários associados ao DDGEI** — usuários sem local são associados automaticamente ao setor DDGEI (em `check_db_integrity`).
+- [x] **Origem automática na saída** — não-admin usa o local do usuário (`registrar_saida` + `MAIN_TEMPLATE`); admin pode selecionar a origem.
+- [x] **Estados de saída no formulário** — campo "Estado de Saída" (preparação, empacotamento, à espera de envio, enviado, recebido) guardado em `estado_rastreio`.
+- [x] **Controlo de permissões na mudança de estado** (`api_movimento_estado`) — origem marca preparação/empacotamento/à espera de envio/enviado; destino marca recebido; admin qualquer.
+- [x] **`session['user_id']` corrigido no login** (`app.py:2391`) — SELECT inclui `id`; `routes_eleitoral.py` usa `session.get('user_id')`.
+- [x] **`check_permission()` refinado** no módulo eleitoral — admin sempre permitido; não-admin exige `eleitoral_local_id`.
+- [x] **Acentos corrigidos** em flash messages ("Saída", "Recepção").
 
-**Trabalho a fazer:**
-- [x] Associar usuários atuais ao local DDGEI (setor_id=3) — feito em `check_db_integrity`.
-- [x] Formulário de saída: origem automática (setor do usuário) para não-admin; selecionável para admin — feito no `MAIN_TEMPLATE` + `registrar_saida`.
-- [x] Histórico de movimentos: mostrar origem e destino separados + estado — feito no `MAIN_TEMPLATE`.
-- [x] Estados de saída no formulário de saída (campo `estado_saida` guardado em `estado_rastreio`) — feito.
-- [ ] **FLUXO COMPLETO DE ESTADOS NÃO IMPLEMENTADO** — falta o mecanismo de mudar o estado ao longo do tempo (preparação → empacotamento → à espera de envio → enviado → recebido) e o controlo de permissões (quem envia não pode marcar como recebido). O estado não aparece nas opções do material.
-- [ ] Admin configura quais usuários realizam ações (campo de permissão no cadastro de usuários).
+**Estado real do código:**
+- `users` tem `setor_id` (local); `inventario_local` tem `setor_id`; `movimentos` tem `setor_origem_id`, `setor_destino_id`, `local_origem`, `local_destino`, `estado_rastreio`.
+- Estados intermédios: `EM_ESTOQUE`, `EM_PREPARACAO`, `EMPACOTAMENTO`, `A_ESPERA_ENVIO`, `EM_TRANSITO`, `RECEBIDO`, `EM_USO`, `AVARIADO`.
+- `confirmar_recepcao_provincia` e `confirmar_recepcao` já atualizam `estado_rastreio`='RECEBIDO' na confirmação (plus `confirmado_destino`).
 
-> **NOTA IMPORTANTE (2026-08-29):** O trabalho está **INCOMPLETO**. Foi adicionado apenas o campo "Estado de Saída" no formulário e guardado na BD, mas o **fluxo completo de mudança de estado** e o **controlo de permissões** (quem envia não pode marcar como recebido) **NÃO foram implementados**. O utilizador reportou que o estado não aparece nas opções do material e que a mudança de status está confusa. Este trabalho deve ser retomado numa próxima sessão com foco em:
-1. Botão/opção para mudar o estado de um movimento ao longo do tempo.
-2. Regras de permissão: origem pode marcar preparação/empacotamento/à espera de envio/enviado; destino pode marcar recebido.
-3. Mostrar o estado atual nas opções do material.
+**Pendente (não commitado / a fazer):**
+- [ ] Commit do trabalho de hoje ainda NÃO feito: permissões por usuário (requisito 6), fix de bug `api_movimento_estado`, migração MD5→werkzeug, `edit_user`/`delete_user` só-admin, UI "Estado" no histórico, acentos, `debug` por env var. **Commitar.**
+- [x] **Admin configura quais usuários realizam ações** — implementado 2026-08-29: campo `permissoes_estado` em `users`; checkboxes no cadastro/edição de usuário; `api_movimento_estado` e `confirmar_recepcao` respeitam a lista (vazio = regra por setor). Ainda não commitado.
 
 ## 4. ESTADO DE IMPLEMENTAÇÃO (2026-08-28)
 
@@ -92,53 +93,45 @@ Branch `main`, `git status` LIMPO, sem conflitos, sem trabalho não commitado. �
 - **Nuvem (Neon)**: não foi possível testar em modo nuvem no ambiente atual (ligação PostgreSQL expirou em timeout de 120s). O esquema PG já inclui as novas tabelas/colunas via `init_pg_db` + sincronização dinâmica; revalidar quando a Neon estiver acessível.
 
 ### PRÓXIMO (opcional)
-- Rever `check_permission()` do módulo eleitoral (retorna `True` sempre) e o `session['user_id']` em `routes_eleitoral.py:255` (causa raiz: login SELECT não inclui `id`).
 - Migrar hash de senhas MD5 para algo mais forte.
-- Corrigir acentuação corrompida em alguns templates.
+- Corrigir acentuação corrompida restante nos templates (fora de flash).
+- Revalidar modo Nuvem (Neon) quando a ligação estiver acessível.
 
 ## 5. PENDÊNCIAS ABERTAS (refinar)
 
 ### Prioridade Alta
 
-- **[Novo - 2026-08-28] Anexo de imagem do documento do equipamento → PDF**
-  - Permitir **anexar uma imagem do documento do equipamento** na entrada, em **qualquer direção, incluindo Central**.
-  - Essa imagem deve ser **transformada em PDF** para armazenamento/consulta.
-
-- **[Novo - 2026-08-28] Estados intermédios de equipamento (NÃO obrigatórios)**
-  - Deve haver um mecanismo **não obrigatório** de outros estados do equipamento, ex: **em preparação, empacotamento, à espera de envio**, etc.
-  - O estado é registado quando aplicável; o fluxo não obriga a passar por todas as etapas.
-
-- **[Novo - 2026-08-28] Movimentação entre Províncias + Acompanhamento (rastreio) + Locais**
-  - Além da Central, o STAE tem **11 direções provinciais** → devem ser **cadastradas como provinciais**.
-  - Quando o equipamento sai, deve existir um **status de acompanhamento** que mostra **onde está**, até ser **confirmado no destino**.
-  - Ao ser confirmado no destino, **atualizar as quantidades**.
-  - **Visibilidade restrita**: só os envolvidos (origem e destino) conseguem **ver** esse equipamento durante o trânsito.
-  - Deve também **salvar os locais** onde o equipamento está **armazenado ou em uso**.
-  - Nota: já existe fluxo de transferência inter-setorial com confirmação de receção no núcleo + guias de movimentação no módulo eleitoral — estender/consolidar para províncias.
-
-- **[Novo - 2026-08-28] Leitura de BARCODE de equipamento**
-  - O sistema deve fazer **scan do barcode** do equipamento, tanto no **cadastro** como na **busca dos detalhes**.
-  - A leitura do barcode **NÃO é obrigatória** no cadastro (campo opcional).
-
-### Prioridade Alta
-- **[TODO código]** `routes_eleitoral.py:255` — `utilizador_id = 1` hardcoded no `encerrar_processo`. Comentário: *"get from session properly"*.
-  - **Causa raiz**: o login em `app.py:1958` faz `SELECT perfil, nome_completo, setor_id, eleitoral_local_id FROM users ...` mas **NÃO inclui `id`**, logo `session['user_id']` nunca é definido.
-  - Outros sítios em `routes_eleitoral.py` (linhas 491, 863, 1079, 1123) usam `session.get('user_id', 1)` — caem no fallback `1` por causa disso.
-  - **Solução proposta**: alterar o SELECT do login para incluir `id` e guardar `session['user_id']`. Depois substituir os `session.get('user_id', 1)`/`utilizador_id = 1` pelo valor real.
+- **[2026-08-29] Trabalho do dia — NÃO commitado**
+  - `gestao_stae/app.py` com: permissões por usuário (`permissoes_estado`), bug corrigido em `api_movimento_estado` (NameError `conn`), migração MD5→werkzeug com retrocompatibilidade, `edit_user`/`delete_user` só-admin, botão/modal "Estado" no histórico de movimentos, acentos corrigidos, `debug` via env var. E `PLAN.md`.
+  - **Ação**: rever o diff, decidir sobre `_fix2.py`/`_fix_confirm.py`, commitar.
 
 ### Prioridade Média
-- **Permissões do Módulo Eleitoral** — `check_permission()` em `routes_eleitoral.py:62` retorna `True` sempre (comentário: *"Temporariamente aberto para evitar bloqueios, refinar depois"*). Em `app.py:1986` `check_permissions()` (before_request) já bloqueia admin vs não-admin para o núcleo. Refinar para o módulo eleitoral seguindo `perfil`.
-- **Hashear senhas** — login usa `hashlib.md5` (`app.py:1954`); hash fraco. Migrar para algo mais forte (bcrypt/werkzeug) e atualizar credenciais padrão.
+- **Permissões do Módulo Eleitoral** — `check_permission()` refinado (admin sempre permitido; não-admin exige `eleitoral_local_id`); ainda pode refinar por `perfil` consoante políticas. Guardado como evolutivo.
 
 ### Prioridade Baixa / Cosmético
-- **Acentuação corrompida em alguns templates** — "Instituições"→"Instituies", "Sada", "Receo", "Disponvel" etc. (round-trip cp1252/utf-8 em patches antigos). Visível na UI.
-- **`debug=True`** em execução local (`app.py` fim).
+- **Valores legados na BD** — status `'Disponvel'`/`'Indisponvel'` (sem acento) já gravados em `inventario_local.status`. Não é corrupção de UI; migrar apenas se quiser normalizar dados históricos (fora do código).
+- **Revalidar modo Nuvem (Neon)** quando a ligação estiver acessível (testes do dia correram sobre SQLite local; `init_pg_db` + sync já incluem `permissoes_estado`).
+
+### RESOLVIDAS (2026-08-28/29)
+- ~~`users.eleitoral_local_id` hardcoded `utilizador_id = 1` em `routes_eleitoral.py:255`~~ — **resolvido** em `da7f5ae`.
+- ~~`check_permission()` retorna `True` sempre~~ — **refinado** em `da7f5ae`.
+- ~~MD5 no hash de senhas~~ — **migrado** em 2026-08-29 para `werkzeug.security` (`generate_password_hash`/`check_password_hash`); login com hash MD5 legado continua a funcionar e é promovido a pbkdf2 na 1ª autenticação (validado por teste).
+- ~~`api_movimento_estado` `NameError`~~ — **bug corrigido** em 2026-08-29 (conn inalcançável após `return`).
+- ~~Admin configura quais usuários realizam ações~~ — **implementado** 2026-08-29 (`permissoes_estado`; sem valor = regra por setor). Ainda não commitado.
+- ~~`debug=True`~~ — **alterado** 2026-08-29 para `os.environ.get('FLASK_DEBUG') == '1'`.
+- ~~Acentos corrompidos restantes~~ — **corrigidos** os visíveis na UI/flash (2026-08-29); só ficam valores legados na BD.
+- ~~Anexo de imagem do documento → PDF~~ — **feito** em `8b410d1`.
+- ~~Estados intermédios de equipamento~~ — **feito** em `8b410d1` + `1d3f9f8`.
+- ~~Movimentação entre Províncias + rastreio + locais~~ — **feito** em `8b410d1`.
+- ~~Leitura de BARCODE~~ — **feito** em `8b410d1`/`8d83bfa`.
+- ~~Desvincular do DDGEI~~ (usuários por local, origem automática, estados de saída, histórico) — **feito** em `db31329`.
+- ~~Confirmação de receção inter-setorial~~ — controlo de permissão (destino/admin) + UPDATE `estado_rastreio`='RECEBIDO' aplicados; **validado** por teste 2026-08-29.
 
 ## 6. Itens de operação / hygiene
 
 - **`stash@{0}`** — WIP antigo (2026-05-14, "Sistema Completo Gestão STAE - Versão Premium"; base `2e80f94`, UI/template DESATUALIZADA). **Supersedido** — pode descartar com `git stash drop stash@{0}`. Não mexer noutra ocasião como se fosse trabalho atual.
 - **Scripts de patch (patch1–patch18, scratch/)** — ferramentas one-off de desenvolvimento/modificação. Já aplicadas ao `app.py`/`routes_eleitoral.py` commitados. NÃO re-executar à toa; são referência histórica.
-- Senhas padrão: admin/admin123, tecnico/tecnico123, protecao/protecao123. Trocar em produção.
+- Senhas padrão: admin/admin123, tecnico/tecnico123, protecao/protecao123. Trocar em produção. Desde 2026-08-29 as senhas usam `werkzeug.security` (pbkdf2); as antigas MD5 ainda aceites e migradas no 1º login.
 
 ## 7. Como executar / testar
 
