@@ -2721,8 +2721,29 @@ def api_movimento_estado():
     obs = data.get('obs', '')
     if not guia or not estado:
         return jsonify({'error': 'Guia e estado são obrigatórios'}), 400
-    conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+    # Controlo de permissoes: origem marca preparacao/empacotamento/espera/envio; destino marca recebido; admin qualquer
+    c.execute("SELECT setor_origem_id, setor_destino_id FROM movimentos WHERE guia=?", (guia,))
+    mov = c.fetchone()
+    if not mov:
+        conn.close()
+        return jsonify({'error': 'Movimento nao encontrado'}), 404
+    setor_origem_id, setor_destino_id = mov
+    meu_setor = session.get('setor_id')
+    is_admin = session.get('perfil') == 'admin'
+    estados_origem = ['EM_PREPARACAO', 'EMPACOTAMENTO', 'A_ESPERA_ENVIO', 'ENVIADO']
+    estados_destino = ['RECEBIDO']
+    permitido = False
+    if is_admin:
+        permitido = True
+    elif estado in estados_origem and setor_origem_id == meu_setor:
+        permitido = True
+    elif estado in estados_destino and setor_destino_id == meu_setor:
+        permitido = True
+    if not permitido:
+        conn.close()
+        return jsonify({'error': 'Sem permissao para alterar este estado'}), 403
     c.execute("UPDATE movimentos SET estado_rastreio=? WHERE guia=?", (estado, guia))
     c.execute('''INSERT INTO equipamento_rastreio (guia, equipamento, numero_serie, estado, local_atual, observacoes, data, utilizador) 
                  SELECT ?, equipamento, numero_serie, ?, ?, ?, ?, ? FROM movimentos WHERE guia=?''',
