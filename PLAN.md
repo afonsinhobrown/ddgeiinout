@@ -29,6 +29,7 @@ O módulo eleitoral usa `dual_execute()` (em `routes_eleitoral.py`) para escreve
 
 Branch `main`. Últimos commits (do mais recente):
 
+- `0ecaa0a` feat: permissoes de estados por usuario, hash werkzeug, fix api_movimento_estado (requisito 6; corrige NameError; UI Estado no histórico; edit_user/delete_user só-admin; debug via env var)
 - `1d3f9f8` feat: controlo de permissoes na mudanca de estado (origem marca preparação/empacotamento/à espera de envio/enviado; destino marca recebido; admin qualquer)
 - `d3dd16b` docs: registar estado real do trabalho
 - `db31329` feat: desvincular do DDGEI — usuarios por local, origem automatica na saida, estados de saida, historico com origem/destino separados
@@ -36,7 +37,7 @@ Branch `main`. Últimos commits (do mais recente):
 - `8b410d1` feat: barcode, movimentacao entre provincias, estados intermédios, imagem->PDF
 - `5ce3824` a `b597956` anteriores (hybrid SQLite/PG, eleitoral, Excel)
 
-**Working tree NÃO está limpo:** `gestao_stae/app.py` e `PLAN.md` modificados (ver secção 4/5 — trabalho do dia). Untracked: `gestao_stae/_fix2.py`, `gestao_stae/_fix_confirm.py` (scripts one-off — as alterações que preparavam já estão aplicadas no código; podem ser removidos ou mantidos como referência histórica).
+**Working tree limpa.** Trabalho do dia commitado em `0ecaa0a`; scripts one-off `_fix2.py`/`_fix_confirm.py` removidos (alterações já no código).
 
 **Todos os ficheiros compilam.** App sobe com `python app.py` (ou `executar.bat`). Login testado (migração MD5→werkzeug automática em utilizadores legados), permissões por usuário e confirmação de receção testados via test client.
 
@@ -69,8 +70,8 @@ Branch `main`. Últimos commits (do mais recente):
 - `confirmar_recepcao_provincia` e `confirmar_recepcao` já atualizam `estado_rastreio`='RECEBIDO' na confirmação (plus `confirmado_destino`).
 
 **Pendente (não commitado / a fazer):**
-- [ ] Commit do trabalho de hoje ainda NÃO feito: permissões por usuário (requisito 6), fix de bug `api_movimento_estado`, migração MD5→werkzeug, `edit_user`/`delete_user` só-admin, UI "Estado" no histórico, acentos, `debug` por env var. **Commitar.**
-- [x] **Admin configura quais usuários realizam ações** — implementado 2026-08-29: campo `permissoes_estado` em `users`; checkboxes no cadastro/edição de usuário; `api_movimento_estado` e `confirmar_recepcao` respeitam a lista (vazio = regra por setor). Ainda não commitado.
+- [x] Trabalho do dia commitado (`0ecaa0a`): permissões por usuário (requisito 6), fix de bug `api_movimento_estado`, migração MD5→werkzeug, `edit_user`/`delete_user` só-admin, UI "Estado" no histórico, acentos, `debug` por env var. `_fix2.py`/`_fix_confirm.py` removidos (alterações já aplicadas).
+- [x] **Admin configura quais usuários realizam ações** — implementado 2026-08-29: campo `permissoes_estado` em `users`; checkboxes no cadastro/edição de usuário; `api_movimento_estado` e `confirmar_recepcao` respeitam a lista (vazio = regra por setor). **Commitado em `0ecaa0a`.**
 
 ## 4. ESTADO DE IMPLEMENTAÇÃO (2026-08-28)
 
@@ -101,9 +102,8 @@ Branch `main`. Últimos commits (do mais recente):
 
 ### Prioridade Alta
 
-- **[2026-08-29] Trabalho do dia — NÃO commitado**
-  - `gestao_stae/app.py` com: permissões por usuário (`permissoes_estado`), bug corrigido em `api_movimento_estado` (NameError `conn`), migração MD5→werkzeug com retrocompatibilidade, `edit_user`/`delete_user` só-admin, botão/modal "Estado" no histórico de movimentos, acentos corrigidos, `debug` via env var. E `PLAN.md`.
-  - **Ação**: rever o diff, decidir sobre `_fix2.py`/`_fix_confirm.py`, commitar.
+- **[2026-08-29] Trabalho do dia — COMMITADO (`0ecaa0a`)**
+  - Permissões por usuário (`permissoes_estado`), bug `api_movimento_estado` corrigido, migração MD5→werkzeug, `edit_user`/`delete_user` só-admin, UI "Estado" no histórico, acentos, `debug` via env var. `_fix2.py`/`_fix_confirm.py` removidos.
 
 ### Prioridade Média
 - **Permissões do Módulo Eleitoral** — `check_permission()` refinado (admin sempre permitido; não-admin exige `eleitoral_local_id`); ainda pode refinar por `perfil` consoante políticas. Guardado como evolutivo.
