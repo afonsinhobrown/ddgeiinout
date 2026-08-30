@@ -119,7 +119,7 @@ Branch `main`. Últimos commits (do mais recente): `8fbc604` (docs), `0ecaa0a` (
 
 ### Prioridade Alta
 
-- **[2026-08-30] Trabalho do dia — NÃO COMMITADO ainda.** Bloco completo do dia (Configurações, relatórios fix, entregue_por/recebido_por, reparação, locais_acesso, alterar senha, módulo eleitoral: fluxo de estados + históricop + Locais + Guia de Saída). Detalhe em §4. Falta apenas: commit (a confirmar com o utilizador) e revalidar modo Nuvem.
+- **[2026-08-30] Trabalho do dia — COMMITADO (`78d1116`).** Bloco completo do dia (Configurações, relatórios fix, entregue_por/recebido_por, reparação, locais_acesso, alterar senha, módulo eleitoral: fluxo de estados + histórico + Locais + Guia de Saída), 9 ficheiros, 1041 inserções. Detalhe em §4. Falta só revalidar funcional o modo Nuvem.
 
 - **[2026-08-29] Trabalho do dia — COMMITADO (`0ecaa0a`)**
   - Permissões por usuário (`permissoes_estado`), bug `api_movimento_estado` corrigido, migração MD5→werkzeug, `edit_user`/`delete_user` só-admin, UI "Estado" no histórico, acentos, `debug` via env var. `_fix2.py`/`_fix_confirm.py` removidos.
