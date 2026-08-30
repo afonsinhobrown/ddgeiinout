@@ -3,7 +3,7 @@
 {% block content %}
 <div class="card" style="max-width: 800px; margin: 0 auto;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem;">
-        <h2>🚚 Emitir Guia de Marcha / Distribuição</h2>
+        <h2>🚚 Emitir Guia de Saída / Distribuição</h2>
         <a href="{{ url_for('eleitoral.distribuicao') }}" class="btn btn-outline">Cancelar</a>
     </div>
 
@@ -15,16 +15,16 @@
                 <label style="display:block; font-weight:bold; margin-bottom:0.5rem;">Local de Origem</label>
                 <select name="local_origem_id" class="btn btn-outline" style="width:100%; text-align:left; background:#fff;" required>
                     <option value="">-- Selecione a Origem --</option>
-                    {% for l in locais %}
+                    {% for l in locais_origem %}
                     <option value="{{ l.id }}">{{ l.tipo }} - {{ l.nome }}</option>
                     {% endfor %}
                 </select>
             </div>
             <div>
-                <label style="display:block; font-weight:bold; margin-bottom:0.5rem;">Local de Destino (Brigada/Província)</label>
+                <label style="display:block; font-weight:bold; margin-bottom:0.5rem;">Local de Destino</label>
                 <select name="local_destino_id" class="btn btn-outline" style="width:100%; text-align:left; background:#fff;" required>
                     <option value="">-- Selecione o Destino --</option>
-                    {% for l in locais %}
+                    {% for l in locais_destino %}
                     <option value="{{ l.id }}">{{ l.tipo }} - {{ l.nome }}</option>
                     {% endfor %}
                 </select>
@@ -65,8 +65,11 @@
         
         <button type="button" onclick="adicionarLinha()" class="btn btn-outline" style="margin-bottom: 2rem;">➕ Adicionar outro material</button>
 
+        <div style="grid-column: 1 / -1; font-size:0.85rem; color:#64748b; margin-top:-1rem;">
+            A guia será criada em estado <strong>Preparação</strong> e pode avançar (Empacotamento → Aguardar envio → Enviado → Recebido).
+        </div>
         <div style="text-align:right;">
-            <button type="submit" class="btn btn-blue" style="font-size: 1.1rem; padding: 0.8rem 2rem;">Emitir Guia</button>
+            <button type="submit" class="btn btn-blue" style="font-size: 1.1rem; padding: 0.8rem 2rem;">Emitir Guia de Saída</button>
         </div>
     </form>
 </div>

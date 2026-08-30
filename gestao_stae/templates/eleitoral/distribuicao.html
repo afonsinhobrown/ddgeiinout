@@ -5,7 +5,7 @@
     <h2>Logística e Distribuição - Material Ativo</h2>
     <div>
         <button onclick="document.getElementById('modalAquisicao').style.display='flex'" class="btn btn-blue">➕ Nova Aquisição</button>
-        <a href="{{ url_for('eleitoral.nova_guia') }}" class="btn btn-blue">🚚 Emitir Guia de Marcha</a>
+        <a href="{{ url_for('eleitoral.nova_guia') }}" class="btn btn-blue">🚚 Emitir Guia de Saída</a>
     </div>
 </div>
 
@@ -77,20 +77,27 @@
                             </ul>
                         </td>
                         <td>
-                            {% if m.estado == 'EM_TRANSITO' %}
-                                <span style="background:#fef08a; color:#854d0e; padding:0.2rem 0.5rem; border-radius:1rem; font-size:0.8rem; font-weight:bold;">Em Trânsito</span>
-                            {% else %}
+                            {% if m.estado == 'RECEBIDO' %}
                                 <span style="background:#bbf7d0; color:#166534; padding:0.2rem 0.5rem; border-radius:1rem; font-size:0.8rem; font-weight:bold;">Recebido</span><br>
                                 <span style="font-size:0.75rem; color:#64748b;">{{ m.data_recepcao }}</span>
+                            {% elif m.estado == 'ENVIADO' %}
+                                <span style="background:#bfdbfe; color:#1e3a8a; padding:0.2rem 0.5rem; border-radius:1rem; font-size:0.8rem; font-weight:bold;">Enviado</span>
+                            {% elif m.estado == 'A_ESPERA_ENVIO' %}
+                                <span style="background:#fef9c3; color:#854d0e; padding:0.2rem 0.5rem; border-radius:1rem; font-size:0.8rem; font-weight:bold;">Aguardando envio</span>
+                            {% elif m.estado == 'EMPACOTAMENTO' %}
+                                <span style="background:#ede9fe; color:#4c1d95; padding:0.2rem 0.5rem; border-radius:1rem; font-size:0.8rem; font-weight:bold;">Empacotamento</span>
+                            {% elif m.estado == 'EM_TRANSITO' %}
+                                <span style="background:#fef08a; color:#854d0e; padding:0.2rem 0.5rem; border-radius:1rem; font-size:0.8rem; font-weight:bold;">Em trânsito</span>
+                            {% else %}
+                                <span style="background:#e2e8f0; color:#334155; padding:0.2rem 0.5rem; border-radius:1rem; font-size:0.8rem; font-weight:bold;">Preparação</span>
                             {% endif %}
                         </td>
-                        <td style="text-align:center;">
-                            {% if m.estado == 'EM_TRANSITO' %}
-                            <form action="{{ url_for('eleitoral.confirmar_rececao', id=m.id) }}" method="POST" style="margin:0;">
+                        <td style="text-align:center; white-space:nowrap;">
+                            <button type="button" class="btn btn-outline" style="font-size:0.75rem; padding:0.3rem 0.6rem;" onclick="abrirFluxo({{ m.id }})">🔍 Ver Fluxo</button>
+                            {% if m.pode_receber %}
+                            <form action="{{ url_for('eleitoral.confirmar_rececao', id=m.id) }}" method="POST" style="margin:0; display:inline;">
                                 <button type="submit" class="btn btn-blue" style="font-size:0.75rem; padding:0.3rem 0.6rem;" onclick="return confirm('Confirma a receção de todo o material descrito nesta guia?');">✔️ Receber</button>
                             </form>
-                            {% else %}
-                            <span style="color:#94a3b8; font-size:0.8rem;">---</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -147,4 +154,159 @@
         </form>
     </div>
 </div>
+
+<!-- Modal Fluxo da Guia -->
+<div id="modalFluxo" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:1000;">
+    <div class="card" style="width:720px; max-height:90vh; overflow-y:auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+            <h3 id="fluxoTitulo" style="margin:0;">Guia #0</h3>
+            <button type="button" class="btn btn-outline" onclick="fecharFluxo()">✕</button>
+        </div>
+        
+        <div id="fluxoOrigemDestino" style="font-size:0.9rem; color:#475569; margin-bottom:1rem;"></div>
+        
+        <!-- Stepper -->
+        <div id="fluxoStepper" style="display:flex; flex-direction:column; gap:0.25rem; margin-bottom:1.5rem;"></div>
+        
+        <!-- Itens -->
+        <h4 style="margin:0.5rem 0; border-bottom:1px solid #e2e8f0; padding-bottom:0.5rem;">📦 Materiais da Guia</h4>
+        <table class="table" style="font-size:0.85rem; margin-top:0.5rem;">
+            <thead><tr><th>Material</th><th style="text-align:right;">Bom</th><th style="text-align:right;">Mau</th><th style="text-align:right;">Total</th></tr></thead>
+            <tbody id="fluxoItens"></tbody>
+        </table>
+        
+        <!-- Histórico -->
+        <h4 style="margin:1rem 0 0.5rem; border-bottom:1px solid #e2e8f0; padding-bottom:0.5rem;">🕑 Histórico de Estados</h4>
+        <div id="fluxoHistorico" style="font-size:0.85rem;"></div>
+        
+        <!-- Ações de avanço -->
+        <div id="fluxoAcoes" style="margin-top:1rem; padding-top:1rem; border-top:1px solid #e2e8f0;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const TITULO_ESTADOS = {
+    'EM_PREPARACAO': 'Preparação',
+    'EMPACOTAMENTO': 'Empacotamento',
+    'A_ESPERA_ENVIO': 'A aguardar envio',
+    'ENVIADO': 'Enviado',
+    'RECEBIDO': 'Recebido'
+};
+const ICONE_ESTADOS = {
+    'EM_PREPARACAO': '📋',
+    'EMPACOTAMENTO': '📦',
+    'A_ESPERA_ENVIO': '⏳',
+    'ENVIADO': '🚚',
+    'RECEBIDO': '✅'
+};
+
+function fecharFluxo() {
+    document.getElementById('modalFluxo').style.display = 'none';
+}
+
+function avancarEstado(movId, estado) {
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/eleitoral/distribuicao/' + movId + '/estado';
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'estado';
+    input.value = estado;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function abrirFluxo(movId) {
+    document.getElementById('fluxoTitulo').textContent = 'Guia #' + movId + ' — Acompanhamento';
+    document.getElementById('modalFluxo').style.display = 'flex';
+    document.getElementById('fluxoItens').innerHTML = '<tr><td colspan="4" style="text-align:center; color:#64748b;">A carregar...</td></tr>';
+    document.getElementById('fluxoStepper').innerHTML = '';
+    document.getElementById('fluxoHistorico').innerHTML = '';
+    document.getElementById('fluxoAcoes').innerHTML = '';
+    
+    fetch('/eleitoral/api/movimento/' + movId + '/fluxo')
+        .then(r => r.json())
+        .then(dados => {
+            if (dados.erro) {
+                document.getElementById('fluxoHistorico').textContent = dados.erro;
+                return;
+            }
+            var m = dados.movimento;
+            document.getElementById('fluxoOrigemDestino').textContent =
+                m.origem + '  ➔  ' + m.destino + '   •   Observações: ' + (m.observacoes_envio || '—');
+            
+            // Stepper
+            var estadoAtual = dados.estado_atual;
+            var idxAtual = dados.estados.indexOf(estadoAtual);
+            var htmlStepper = '';
+            dados.estados.forEach(function(est, i) {
+                var alcancado = i < idxAtual || (dados.historico.some(h => h.estado === est));
+                var ehCorrente = est === estadoAtual;
+                var cor = (est === 'RECEBIDO' ? (i <= idxAtual ? '#22c55e' : '#cbd5e1') : (alcancado ? '#0284c7' : '#cbd5e1'));
+                var registado = dados.historico.filter(h => h.estado === est)[0];
+                var info = registado ? ('&nbsp;<span style="font-size:0.7rem; color:#64748b;">' +
+                    (registado.data || '') + (registado.utilizador_nome ? ' — ' + registado.utilizador_nome : '') + '</span>') : '';
+                var obs = registado && registado.observacoes ? '<div style="font-size:0.75rem; color:#64748b;">' + registado.observacoes + '</div>' : '';
+                htmlStepper +=
+                    '<div style="display:flex; align-items:center; gap:1rem; padding:0.5rem 0;">' +
+                        '<div style="min-width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:' + cor + '; color:#fff; font-size:1.2rem; font-weight:bold; border:3px solid ' + (ehCorrente ? '#f59e0b' : 'transparent') + ';">' + ICONE_ESTADOS[est] + '</div>' +
+                        '<div style="flex:1;">' +
+                            '<div style="font-weight:' + (ehCorrente ? '700' : '500') + '; color:' + (ehCorrente ? '#f59e0b' : '#1e293b') + ';">' + (TITULO_ESTADOS[est] || est) + (ehCorrente ? ' <span style="font-size:0.7rem; color:#f59e0b;">(atual)</span>' : (i === 0 ? '' : '')) + '</div>' +
+                            info + obs +
+                        '</div>' +
+                        (alcancado && !ehCorrente ? '<div style="color:#22c55e; font-size:0.8rem;">✔</div>' : '') +
+                    '</div>';
+            });
+            document.getElementById('fluxoStepper').innerHTML = htmlStepper;
+            
+            // Itens
+            var htmlItens = '';
+            dados.itens.forEach(function(it) {
+                htmlItens += '<tr><td>' + it.material + (it.variante ? ' (' + it.variante + ')' : '') + '</td>' +
+                    '<td style="text-align:right; color:#22c55e;">' + it.quantidade_bom + '</td>' +
+                    '<td style="text-align:right; color:#ef4444;">' + it.quantidade_mau + '</td>' +
+                    '<td style="text-align:right;"><strong>' + (it.quantidade_bom + it.quantidade_mau) + '</strong></td></tr>';
+            });
+            document.getElementById('fluxoItens').innerHTML = htmlItens || '<tr><td colspan="4" style="text-align:center; color:#64748b;">Sem itens.</td></tr>';
+            
+            // Histórico
+            var htmlHist = '';
+            dados.historico.forEach(function(h) {
+                htmlHist += '<div style="padding:0.4rem 0; border-bottom:1px dashed #e2e8f0;">' +
+                    '<span style="background:#f1f5f9; padding:2px 8px; border-radius:12px; font-size:0.75rem;">' + (TITULO_ESTADOS[h.estado] || h.estado) + '</span>' +
+                    ' <span style="color:#64748b;">' + (h.data || '') + '</span>' +
+                    '<div style="color:#475569; margin-top:0.2rem;">' + (h.observacoes || '') + (h.utilizador_nome ? ' <em>— ' + h.utilizador_nome + '</em>' : '') + '</div>' +
+                '</div>';
+            });
+            document.getElementById('fluxoHistorico').innerHTML = htmlHist || '<div style="color:#64748b;">Sem registos de estados.</div>';
+            
+            // Ações
+            var htmlAcoes = '';
+            if (dados.pode_avancar && dados.proximos.length) {
+                htmlAcoes += '<div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">' +
+                    '<span style="font-weight:bold;">Avançar guia:</span>';
+                dados.proximos.forEach(function(est) {
+                    htmlAcoes += '<button class="btn btn-blue" style="font-size:0.8rem; padding:0.4rem 0.7rem;" onclick="avancarEstado(' + m.id + ', \'' + est + '\')">' + ICONE_ESTADOS[est] + ' ' + (TITULO_ESTADOS[est] || est) + '</button>';
+                });
+                htmlAcoes += '</div>';
+            }
+            if (dados.pode_receber) {
+                htmlAcoes += '<div style="margin-top:1rem;">' +
+                    '<form action="/eleitoral/distribuicao/' + m.id + '/confirmar" method="POST" onsubmit="return confirm(\'Confirma a receção de todo o material descrito nesta guia?\');">' +
+                    '<button type="submit" class="btn btn-blue" style="background:#16a34a;">✅ Confirmar Receção (somar ao stock)</button>' +
+                    '</form></div>';
+            }
+            if (!htmlAcoes) {
+                htmlAcoes = '<div style="color:#94a3b8; font-size:0.85rem;">Sem ações disponíveis para o seu utilizador neste estado.</div>';
+            }
+            document.getElementById('fluxoAcoes').innerHTML = htmlAcoes;
+        })
+        .catch(err => {
+            document.getElementById('fluxoHistorico').textContent = 'Erro ao carregar fluxo: ' + err;
+        });
+}
+</script>
 {% endblock %}

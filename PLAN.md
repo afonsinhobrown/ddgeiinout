@@ -2,7 +2,7 @@
 
 > **Documento de continuidade.** Qualquer agente/sessão que retomar este projeto DEVE ler este ficheiro primeiro. Atualizar sempre que concluir ou iniciar trabalho. Registar aqui o estado real, decisões e pendências — nunca depender de stash/commits para comunicação.
 
-Última atualização: 2026-08-29
+Última atualização: 2026-08-30
 
 ---
 
@@ -25,21 +25,38 @@ Duas áreas:
 
 O módulo eleitoral usa `dual_execute()` (em `routes_eleitoral.py`) para escrever **em SQLite E PostgreSQL simultaneamente** (falha de PG não bloqueia).
 
-## 3. Estado atual (2026-08-29)
+## 3. Estado atual (2026-08-30)
 
-Branch `main`. Últimos commits (do mais recente):
+Branch `main`. Últimos commits (do mais recente): `8fbc604` (docs), `0ecaa0a` (permissões por usuário, hash werkzeug, fix api_movimento_estado), `1d3f9f8` (controlo de permissões na mudança de estado), `d3dd16b` (docs), `db31329` (desvincular do DDGEI, usuários por local), `da7f5ae` (session user_id, check_permission, acentos), `8b410d1` (barcode, províncias, estados intermédios, imagem→PDF).
 
-- `0ecaa0a` feat: permissoes de estados por usuario, hash werkzeug, fix api_movimento_estado (requisito 6; corrige NameError; UI Estado no histórico; edit_user/delete_user só-admin; debug via env var)
-- `1d3f9f8` feat: controlo de permissoes na mudanca de estado (origem marca preparação/empacotamento/à espera de envio/enviado; destino marca recebido; admin qualquer)
-- `d3dd16b` docs: registar estado real do trabalho
-- `db31329` feat: desvincular do DDGEI — usuarios por local, origem automatica na saida, estados de saida, historico com origem/destino separados
-- `da7f5ae` fix: session user_id no login, refinamento de check_permission, acentos corrompidos
-- `8b410d1` feat: barcode, movimentacao entre provincias, estados intermédios, imagem->PDF
-- `5ce3824` a `b597956` anteriores (hybrid SQLite/PG, eleitoral, Excel)
+**Working tree NÃO limpa.** Grande bloco de trabalho de 2026-08-30 **NÃO commitado** (detalhe completo em §4).
 
-**Working tree limpa.** Trabalho do dia commitado em `0ecaa0a`; scripts one-off `_fix2.py`/`_fix_confirm.py` removidos (alterações já no código).
+**Estado real / verificação do dia:**
+- `app.py` e `routes_eleitoral.py` compilam (`ast.parse`, via script em temp — PowerShell não aceita heredoc/aspas triplas em `-c`).
+- Templates inline de `app.py` (`MAIN_TEMPLATE`, `CADASTROS_TEMPLATE`, `RELATORIOS_TEMPLATE`, `LOGIN_TEMPLATE`) e todos os templates de `templates/eleitoral/` renderizam via Jinja2.
+- `import app` e `import routes_eleitoral` OK em modo nuvem; `init_pg_db` + `migrar_schema_eleitoral` aplicados ao PG (coluna `tem_filhos` + tabela `eleitoral_movimento_historico`) e ao SQLite.
+- App corre em modo nuvem (PG) no ambiente atual; SQLite mantido pelo setup híbrido.
 
-**Todos os ficheiros compilam.** App sobe com `python app.py` (ou `executar.bat`). Login testado (migração MD5→werkzeug automática em utilizadores legados), permissões por usuário e confirmação de receção testados via test client.
+## 4. ESTADO DE IMPLEMENTAÇÃO — DIA 2026-08-30 (NÃO COMMITADO)
+
+**Núcleo (`gestao_stae/app.py`):**
+- [x] Botão/título **"Cadastros" → "Configurações"** (`MAIN_TEMPLATE` + `CADASTROS_TEMPLATE`).
+- [x] **Dashboard de relatórios corrigido** — `RELATORIOS_TEMPLATE` reescrito (toolbar de filtros, tabs Inventário/Entradas-Saídas/Movimentos, tabela de itens, gráficos) e `/relatorios` passa `stat_equip/stat_setor/stat_marca` via `json.dumps`; exports usam `?tab={{ tab }}`.
+- [x] **`entregue_por` / `recebido_por` obrigatórios** — validação server-side em `registrar_entrada`, `registrar_saida`, `registrar_saida_reparacao` (flash + redirect).
+- [x] **Reparação** — na entrada, se motivo contém "repara" e S/N vazio/N/A → `numero_serie = guia`; na saída, `guia_saida = f"{guia_origem}-SAI"` (variante) preservando o S/N original.
+- [x] **Permissões admin + acesso por locais** — coluna `users.locais_acesso` (SQLite via `check_db_integrity`, PG via `init_pg_db`); helper `get_locais_acesso()`; login guarda `session['locais_acesso']`; `/`, `/movimentos`, `/inventario` filtram com `IN (...)` para não-admin.
+- [x] **Configurações** — secção "Alterar a minha palavra-passe" (form POST `/alterar_senha`, valida senha atual, nova==confirmação, ≥4 chars, pbkdf2); checkboxes `locais_acesso` no add/edit user; scroll no módulo de edição (editModal `max-height:92vh`, editFields `max-height:60vh`).
+
+**Módulo Eleitoral (`routes_eleitoral.py` + `templates/eleitoral/`):**
+- [x] Schema: `eleitoral_local_armazenamento.tem_filhos` + tabela `eleitoral_movimento_historico` (SQLite+PG, `migrar_schema_eleitoral` em `app.py`).
+- [x] **Nova Aquisição validada** — só em processo `EM_CURSO` com `ano >= ano corrente`; modal de processos default `ano` = ano atual.
+- [x] **"Guia de Marcha" → "Guia de Saída"** (titulos/botões); corrigido bug latente no form (`locais` → `locais_origem`/`locais_destino`).
+- [x] **Página "Locais"** (nova rota `/eleitoral/locais` + template `locais.html`): CRUD com 13 tipos hierárquicos (directiva geral/nacional/provincial, departamentos, repartição, direcção distrital, postos de recenseamento/votação, entidade externa, + legados CENTRAL/PROVINCIA/PAIS_DIASPORA), campo pai/filhos (`parent_id`, `tem_filhos`) e `provincia_id`.
+- [x] **Fluxo de distribuição** — nova guia default `EM_PREPARACAO` (1) → `EMPACOTAMENTO` (2) → `A_ESPERA_ENVIO` (3) → `ENVIADO` (4) → `RECEBIDO` (5); rota `/distribuicao/<id>/estado` só avança e só a origem (admin qualquer); `confirmar_rececao` exige `ENVIADO` (aceita legados `EM_TRANSITO`) e soma o stock; cada mudança é registada em `eleitoral_movimento_historico`.
+- [x] **Modal de fluxo com ícones** em `distribuicao.html` (stepper com ícones por etapa, datas/utilizadores do histórico, permissões de avanço/recepção calculadas em `/api/movimento/<id>/fluxo`).
+- [x] **Dashboard/mapa** agregam por `provincia_id` (join `eleitoral_provincia`) em vez de `tipo='PROVINCIA'`; `material.html` agrupa locais dinamicamente por tipo.
+
+**Notas:** a rota `/alterar_senha` é acessível a qualquer utilizador autenticado, mas o formulário fica apenas em `/cadastros` (admin-only). A tabela `eleitoral_movimento_historico` NÃO foi adicionada ao `SYNC_CONFIG` (é escrita diretamente nas duas BDs).
 
 ## 4. ESTADO DE IMPLEMENTAÇÃO (2026-08-29)
 
@@ -102,6 +119,8 @@ Branch `main`. Últimos commits (do mais recente):
 
 ### Prioridade Alta
 
+- **[2026-08-30] Trabalho do dia — NÃO COMMITADO ainda.** Bloco completo do dia (Configurações, relatórios fix, entregue_por/recebido_por, reparação, locais_acesso, alterar senha, módulo eleitoral: fluxo de estados + históricop + Locais + Guia de Saída). Detalhe em §4. Falta apenas: commit (a confirmar com o utilizador) e revalidar modo Nuvem.
+
 - **[2026-08-29] Trabalho do dia — COMMITADO (`0ecaa0a`)**
   - Permissões por usuário (`permissoes_estado`), bug `api_movimento_estado` corrigido, migração MD5→werkzeug, `edit_user`/`delete_user` só-admin, UI "Estado" no histórico, acentos, `debug` via env var. `_fix2.py`/`_fix_confirm.py` removidos.
 
@@ -112,7 +131,12 @@ Branch `main`. Últimos commits (do mais recente):
 - **Valores legados na BD** — status `'Disponvel'`/`'Indisponvel'` (sem acento) já gravados em `inventario_local.status`. Não é corrupção de UI; migrar apenas se quiser normalizar dados históricos (fora do código).
 - **Revalidar modo Nuvem (Neon)** quando a ligação estiver acessível (testes do dia correram sobre SQLite local; `init_pg_db` + sync já incluem `permissoes_estado`).
 
-### RESOLVIDAS (2026-08-28/29)
+### RESOLVIDAS (2026-08-28/29/30)
+- ~~Relatórios: dashboard partido (stat_* ausentes)~~ — **resolvido** 2026-08-30 (RELATORIOS_TEMPLATE + stats + tabs).
+- ~~"Cadastros"/"Guia de Marcha"/"Brigada"~~ — **renomeados** 2026-08-30 ("Configurações", "Guia de Saída", hierarquia de Locais sem brigadas).
+- ~~Nova Aquisição sem validação de processo~~ — **resolvido** 2026-08-30 (exige processo EM_CURSO com ano ≥ corrente; ano default na UI).
+- ~~Acompanhamento de distribuição sem histórico de estados~~ — **resolvido** 2026-08-30 (fluxo 5 estados + modal com ícones + `eleitoral_movimento_historico`).
+- ~~`(index):1009 Unexpected string` — erro de sintaxe JS na página inicial~~ — **corrigido** 2026-08-30: no `MAIN_TEMPLATE` (`app.py:1264`) o `\'` dentro de string `'''...'''` do Python era des-escapado para `'`, gerando `'' + guia + ''` (JS inválido). Corrigido para `\\'`. Também adicionado favicon inline (SVG data-URI) em `COMMON_HEAD` para eliminar o 404 de `favicon.ico`.
 - ~~`users.eleitoral_local_id` hardcoded `utilizador_id = 1` em `routes_eleitoral.py:255`~~ — **resolvido** em `da7f5ae`.
 - ~~`check_permission()` retorna `True` sempre~~ — **refinado** em `da7f5ae`.
 - ~~MD5 no hash de senhas~~ — **migrado** em 2026-08-29 para `werkzeug.security` (`generate_password_hash`/`check_password_hash`); login com hash MD5 legado continua a funcionar e é promovido a pbkdf2 na 1ª autenticação (validado por teste).

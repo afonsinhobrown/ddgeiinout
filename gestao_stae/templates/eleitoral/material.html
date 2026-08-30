@@ -26,24 +26,13 @@
             <label style="display:block; font-size:0.8rem; color:#64748b; margin-bottom:0.2rem;">Local de Armazenamento:</label>
             <select name="local_id" class="btn btn-outline" style="width:100%; padding:0.5rem; text-align:left; background:#f8fafc;">
                 <option value="">Selecione o Local...</option>
-                
-                <optgroup label="Províncias">
-                {% for loc in locais['PROVINCIA'] %}
+                {% for tipo, locs in locais.items() if locs %}
+                <optgroup label="{{ tipo|replace('_', ' ')|title }}">
+                {% for loc in locs %}
                     <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
                 {% endfor %}
                 </optgroup>
-                
-                <optgroup label="Países da Diáspora">
-                {% for loc in locais['PAIS_DIASPORA'] %}
-                    <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
                 {% endfor %}
-                </optgroup>
-                
-                <optgroup label="Central">
-                {% for loc in locais['CENTRAL'] %}
-                    <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
-                {% endfor %}
-                </optgroup>
             </select>
         </div>
         <div style="flex:1;">
@@ -122,21 +111,13 @@
                     <label style="display:block; margin-bottom: 0.5rem;">Local de Armazenamento</label>
                     <select name="modal_local_id" required style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
                         <option value="">-- Selecione --</option>
-                        <optgroup label="Províncias">
-                        {% for loc in locais['PROVINCIA'] %}
+                        {% for tipo, locs in locais.items() if locs %}
+                        <optgroup label="{{ tipo|replace('_', ' ')|title }}">
+                        {% for loc in locs %}
                             <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
                         {% endfor %}
                         </optgroup>
-                        <optgroup label="Países da Diáspora">
-                        {% for loc in locais['PAIS_DIASPORA'] %}
-                            <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
                         {% endfor %}
-                        </optgroup>
-                        <optgroup label="Central">
-                        {% for loc in locais['CENTRAL'] %}
-                            <option value="{{ loc.id }}" {% if loc.id|string == local_id|string %}selected{% endif %}>{{ loc.nome }}</option>
-                        {% endfor %}
-                        </optgroup>
                     </select>
                 </div>
             </div>

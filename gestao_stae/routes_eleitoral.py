@@ -1,5 +1,6 @@
-from flask import Blueprint, render_template, request, session, redirect, url_for, flash
+from flask import Blueprint, render_template, request, session, redirect, url_for, flash, jsonify
 import sqlite3
+import datetime
 try:
     import psycopg2
     import psycopg2.extras
@@ -8,6 +9,44 @@ except ImportError:
 
 # Define o Blueprint
 eleitoral_bp = Blueprint('eleitoral', __name__, url_prefix='/eleitoral')
+
+# Estados do fluxo de distribuição (ordem de avanço)
+ESTADOS_DISTRIBUICAO_ORDEM = {
+    'EM_PREPARACAO': 1,
+    'EMPACOTAMENTO': 2,
+    'A_ESPERA_ENVIO': 3,
+    'ENVIADO': 4,
+    'RECEBIDO': 5,
+    # Estado legado (guias antigas) — equiparado a "em trânsito" (entre envio e receção)
+    'EM_TRANSITO': 4,
+}
+ESTADOS_DISTRIBUICAO = list(ESTADOS_DISTRIBUICAO_ORDEM.keys())[:5]
+
+# Tipos possíveis para os locais de armazenamento (hierarquia eleitoral, sem brigadas)
+ELEITORAL_TIPOS_LOCAL = [
+    'DIRECAO_GERAL',
+    'DIRECAO_NACIONAL',
+    'DIRECAO_PROVINCIAL',
+    'DEPARTAMENTO_NACIONAL',
+    'DEPARTAMENTO_PROVINCIAL',
+    'REPARTICAO',
+    'DIRECAO_DISTRITAL',
+    'POSTO_RECENSEAMENTO',
+    'POSTO_VOTACAO',
+    'ENTIDADE_EXTERNA',
+    'CENTRAL',
+    'PROVINCIA',
+    'PAIS_DIASPORA',
+]
+
+TITULO_ESTADO = {
+    'EM_PREPARACAO': 'Preparação',
+    'EMPACOTAMENTO': 'Empacotamento',
+    'A_ESPERA_ENVIO': 'A aguardar envio',
+    'ENVIADO': 'Enviado',
+    'RECEBIDO': 'Recebido',
+    'EM_TRANSITO': 'Em trânsito',
+}
 
 def get_eleitoral_db():
     from app import DB_PATH, get_pg_connection, is_cloud_mode
@@ -137,18 +176,19 @@ def dashboard():
     # Provincias
     cond_proc_prov = cond_proc_join
     if cond_proc_prov:
-        cond_proc_prov += " AND l.tipo = 'PROVINCIA'"
+        cond_proc_prov += " AND p.id IS NOT NULL"
     else:
-        cond_proc_prov = "WHERE l.tipo = 'PROVINCIA'"
+        cond_proc_prov = "WHERE p.id IS NOT NULL"
         
     c.execute(f"""
-        SELECT l.nome as provincia, t.nome as tipo, SUM(s.quantidade_total) as total
+        SELECT p.nome as provincia, t.nome as tipo, SUM(s.quantidade_total) as total
         FROM eleitoral_material_sobrante s
         JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
+        LEFT JOIN eleitoral_provincia p ON p.id = l.provincia_id
         JOIN eleitoral_tipo_material t ON s.tipo_material_id = t.id
         {cond_proc_prov}
-        GROUP BY l.nome, t.nome
-        ORDER BY l.nome
+        GROUP BY p.nome, t.nome
+        ORDER BY p.nome
     """, param)
     prov_rows = c.fetchall()
     
@@ -297,12 +337,9 @@ def material():
     # Locais para a dropdown
     c.execute("SELECT id, tipo, nome FROM eleitoral_local_armazenamento ORDER BY tipo, nome")
     locais_db = c.fetchall()
-    locais = {'PROVINCIA': [], 'PAIS_DIASPORA': [], 'CENTRAL': []}
+    locais = {}
     for loc in locais_db:
-        if is_pg:
-            locais[loc['tipo']].append(loc)
-        else:
-            locais[loc['tipo']].append(loc)
+        locais.setdefault(loc['tipo'], []).append(loc)
 
     processo_id = request.args.get('processo_id')
     local_id = request.args.get('local_id')
@@ -869,9 +906,9 @@ def confirmar_rececao(id):
         c.execute(f"SELECT * FROM eleitoral_movimento_material WHERE id = {param_marker}", (id,))
         mov = c.fetchone()
         
-        if not mov or mov['estado' if is_pg else 'estado'] != 'EM_TRANSITO':
+        if not mov or mov['estado' if is_pg else 'estado'] not in ('ENVIADO', 'EM_TRANSITO'):
             conn.close()
-            flash("Movimento inválido ou já rececionado.", "error")
+            flash("Movimento inválido ou ainda não enviado.", "error")
             return redirect(url_for('eleitoral.distribuicao'))
             
         processo_id = mov['processo_id' if is_pg else 'processo_id']
@@ -889,9 +926,11 @@ def confirmar_rececao(id):
                 return redirect(url_for('eleitoral.distribuicao'))
                 
         # Update estado
-        import datetime
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         c.execute(f"UPDATE eleitoral_movimento_material SET estado = 'RECEBIDO', data_recepcao = {param_marker}, utilizador_recepcao_id = {param_marker} WHERE id = {param_marker}", (now, utilizador_id, id))
+        # Regista a receção no histórico
+        c.execute(f"INSERT INTO eleitoral_movimento_historico (movimento_id, estado, observacoes, data, utilizador_id) VALUES ({param_marker}, {param_marker}, {param_marker}, {param_marker}, {param_marker})",
+                  (id, 'RECEBIDO', 'Receção do material confirmada pelo destino', now, utilizador_id))
         
         # Get itens
         c.execute(f"SELECT * FROM eleitoral_movimento_item WHERE movimento_id = {param_marker}", (id,))
@@ -924,8 +963,6 @@ def confirmar_rececao(id):
     conn.close()
     return redirect(url_for('eleitoral.distribuicao'))
 
-from flask import jsonify
-
 
 @eleitoral_bp.route('/api/mapa_distribuicao')
 def api_mapa_distribuicao():
@@ -942,7 +979,7 @@ def api_mapa_distribuicao():
         
     processo_id = processo_ativo['id'] if is_pg else processo_ativo['id']
     
-    # Map Provincias and Brigades directly associated
+    # Map by provincia (join com eleitoral_provincia para suportar a hierarquia de locais)
     param = (processo_id,)
     query = '''
         SELECT 
@@ -952,7 +989,7 @@ def api_mapa_distribuicao():
             SUM(s.quantidade_mau) as mau
         FROM eleitoral_material_sobrante s
         JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
-        LEFT JOIN eleitoral_local_armazenamento p ON l.parent_id = p.id OR (l.tipo = 'Provincial' AND l.id = p.id)
+        LEFT JOIN eleitoral_provincia p ON p.id = l.provincia_id
         WHERE s.processo_id = %s
         GROUP BY p.nome
     ''' if is_pg else '''
@@ -963,7 +1000,7 @@ def api_mapa_distribuicao():
             SUM(s.quantidade_mau) as mau
         FROM eleitoral_material_sobrante s
         JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
-        LEFT JOIN eleitoral_local_armazenamento p ON l.parent_id = p.id OR (l.tipo = 'Provincial' AND l.id = p.id)
+        LEFT JOIN eleitoral_provincia p ON p.id = l.provincia_id
         WHERE s.processo_id = ?
         GROUP BY p.nome
     '''
@@ -982,6 +1019,205 @@ def api_mapa_distribuicao():
             }
             
     return jsonify(resultado)
+
+@eleitoral_bp.route('/distribuicao/<int:id>/estado', methods=['POST'])
+def atualizar_estado_movimento(id):
+    novo_estado = request.form.get('estado')
+    observacoes = (request.form.get('observacoes') or '').strip()
+    
+    if novo_estado not in ESTADOS_DISTRIBUICAO:
+        flash("Estado inválido.", "error")
+        return redirect(url_for('eleitoral.distribuicao'))
+    if novo_estado == 'RECEBIDO':
+        flash("Para confirmar a receção use o botão 'Receber' na guia (soma o stock ao destino).", "error")
+        return redirect(url_for('eleitoral.distribuicao'))
+    
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
+    param_marker = '%s' if is_pg else '?'
+    utilizador_id = session.get('user_id')
+    
+    try:
+        c.execute(f"SELECT * FROM eleitoral_movimento_material WHERE id = {param_marker}", (id,))
+        mov = c.fetchone()
+        if not mov:
+            conn.close()
+            flash("Guia não encontrada.", "error")
+            return redirect(url_for('eleitoral.distribuicao'))
+        
+        estado_atual = mov['estado' if is_pg else 'estado']
+        idx_novo = ESTADOS_DISTRIBUICAO_ORDEM[novo_estado]
+        idx_atual = ESTADOS_DISTRIBUICAO_ORDEM.get(estado_atual, 0)
+        
+        if idx_novo <= idx_atual:
+            conn.close()
+            flash("Só é possível avançar para um estado superior ao atual.", "error")
+            return redirect(url_for('eleitoral.distribuicao'))
+        
+        user_perfil = session.get('perfil')
+        user_local_id = session.get('eleitoral_local_id')
+        origem_id = mov['local_origem_id' if is_pg else 'local_origem_id']
+        
+        if user_perfil != 'admin':
+            if not user_local_id or origem_id != user_local_id:
+                conn.close()
+                flash("Apenas o local de origem pode avançar o estado da guia.", "error")
+                return redirect(url_for('eleitoral.distribuicao'))
+        
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        c.execute(f"UPDATE eleitoral_movimento_material SET estado = {param_marker} WHERE id = {param_marker}", (novo_estado, id))
+        c.execute(f"INSERT INTO eleitoral_movimento_historico (movimento_id, estado, observacoes, data, utilizador_id) VALUES ({param_marker}, {param_marker}, {param_marker}, {param_marker}, {param_marker})",
+                  (id, novo_estado, observacoes or f"Avanço para {TITULO_ESTADO.get(novo_estado, novo_estado)}", now, utilizador_id))
+        
+        conn.commit()
+        flash(f"Guia avançada para: {TITULO_ESTADO.get(novo_estado, novo_estado)}.", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Erro ao atualizar estado: {str(e)}", "error")
+    finally:
+        conn.close()
+    return redirect(url_for('eleitoral.distribuicao'))
+
+@eleitoral_bp.route('/api/movimento/<int:id>/fluxo')
+def api_movimento_fluxo(id):
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
+    param_marker = '%s' if is_pg else '?'
+    try:
+        c.execute(f"""
+            SELECT m.*, lo.nome as origem, ld.nome as destino
+            FROM eleitoral_movimento_material m
+            JOIN eleitoral_local_armazenamento lo ON m.local_origem_id = lo.id
+            JOIN eleitoral_local_armazenamento ld ON m.local_destino_id = ld.id
+            WHERE m.id = {param_marker}
+        """, (id,))
+        mov = c.fetchone()
+        if not mov:
+            conn.close()
+            return jsonify({'erro': 'Guia não encontrada'}), 404
+        
+        c.execute(f"""
+            SELECT i.*, t.nome as material, t.variante
+            FROM eleitoral_movimento_item i
+            JOIN eleitoral_tipo_material t ON i.tipo_material_id = t.id
+            WHERE i.movimento_id = {param_marker}
+        """, (id,))
+        itens = c.fetchall()
+        
+        c.execute(f"""
+            SELECT h.*, u.nome_completo as utilizador_nome, u.username as utilizador_username
+            FROM eleitoral_movimento_historico h
+            LEFT JOIN users u ON h.utilizador_id = u.id
+            WHERE h.movimento_id = {param_marker}
+            ORDER BY h.id ASC
+        """, (id,))
+        historico = c.fetchall()
+        
+        estado_atual = mov['estado' if is_pg else 'estado']
+        idx_atual = ESTADOS_DISTRIBUICAO_ORDEM.get(estado_atual, 0)
+        
+        user_perfil = session.get('perfil')
+        user_local_id = session.get('eleitoral_local_id')
+        is_admin = user_perfil == 'admin'
+        origem_id = mov['local_origem_id' if is_pg else 'local_origem_id']
+        destino_id = mov['local_destino_id' if is_pg else 'local_destino_id']
+        pode_avancar = bool(is_admin or (user_local_id and origem_id == user_local_id)) and idx_atual < ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO']
+        pode_receber = idx_atual == ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO'] and (is_admin or (user_local_id and destino_id == user_local_id))
+        proximos = [s for s, o in ESTADOS_DISTRIBUICAO_ORDEM.items() if o > idx_atual and o < ESTADOS_DISTRIBUICAO_ORDEM['RECEBIDO']]
+        
+        conn.close()
+        return jsonify({
+            'movimento': dict(mov),
+            'itens': [dict(i) for i in itens],
+            'historico': [dict(h) for h in historico],
+            'estados': ESTADOS_DISTRIBUICAO,
+            'estado_atual': estado_atual,
+            'pode_avancar': pode_avancar,
+            'pode_receber': pode_receber,
+            'proximos': proximos,
+        })
+    except Exception as e:
+        conn.close()
+        return jsonify({'erro': str(e)}), 500
+
+@eleitoral_bp.route('/locais')
+def locais():
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
+    
+    c.execute("SELECT * FROM eleitoral_local_armazenamento ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, tipo, nome")
+    locais_lista = c.fetchall()
+    locais_row = [dict(l) for l in locais_lista] if not is_pg else locais_lista
+    
+    c.execute("SELECT id, nome FROM eleitoral_provincia ORDER BY nome")
+    provincias = c.fetchall()
+    
+    # Mapa para mostrar o pai
+    mapa_nomes = {l['id']: f"{l['tipo']} - {l['nome']}" for l in locais_lista}
+    for l in locais_row:
+        l['pai_nome'] = mapa_nomes.get(l['parent_id']) if l['parent_id'] else None
+        l['n_filhos'] = sum(1 for x in locais_lista if x['parent_id'] == l['id'])
+    
+    conn.close()
+    return render_template('eleitoral/locais.html', locais=locais_row, tipos=ELEITORAL_TIPOS_LOCAL, provincias=provincias)
+
+@eleitoral_bp.route('/locais/criar', methods=['POST'])
+def criar_local():
+    nome = (request.form.get('nome') or '').strip()
+    tipo = request.form.get('tipo')
+    parent_id = request.form.get('parent_id') or None
+    tem_filhos = 1 if request.form.get('tem_filhos') == 'sim' else 0
+    provincia_id = request.form.get('provincia_id') or None
+    observacoes = request.form.get('observacoes') or None
+    
+    if not nome or not tipo:
+        flash("Nome e tipo do local são obrigatórios.", "error")
+        return redirect(url_for('eleitoral.locais'))
+    if tipo not in ELEITORAL_TIPOS_LOCAL:
+        flash("Tipo de local inválido.", "error")
+        return redirect(url_for('eleitoral.locais'))
+    
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor()
+    try:
+        param_marker = '%s' if is_pg else '?'
+        c.execute(f"INSERT INTO eleitoral_local_armazenamento (nome, tipo, parent_id, tem_filhos, provincia_id, observacoes) VALUES ({param_marker}, {param_marker}, {param_marker}, {param_marker}, {param_marker}, {param_marker})",
+                  (nome, tipo, parent_id, tem_filhos, provincia_id, observacoes))
+        conn.commit()
+        flash(f"Local '{nome}' criado com sucesso!", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Erro ao criar local: {str(e)}", "error")
+    finally:
+        conn.close()
+    return redirect(url_for('eleitoral.locais'))
+
+@eleitoral_bp.route('/locais/editar/<int:id>', methods=['POST'])
+def editar_local(id):
+    nome = (request.form.get('nome') or '').strip()
+    tipo = request.form.get('tipo')
+    parent_id = request.form.get('parent_id') or None
+    tem_filhos = 1 if request.form.get('tem_filhos') == 'sim' else 0
+    provincia_id = request.form.get('provincia_id') or None
+    observacoes = request.form.get('observacoes') or None
+    activo = 1 if request.form.get('activo') == 'sim' else 0
+    
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor()
+    try:
+        param_marker = '%s' if is_pg else '?'
+        if parent_id and int(parent_id) == id:
+            parent_id = None
+        c.execute(f"UPDATE eleitoral_local_armazenamento SET nome = {param_marker}, tipo = {param_marker}, parent_id = {param_marker}, tem_filhos = {param_marker}, provincia_id = {param_marker}, observacoes = {param_marker}, activo = {param_marker} WHERE id = {param_marker}",
+                  (nome, tipo, parent_id, tem_filhos, provincia_id, observacoes, activo, id))
+        conn.commit()
+        flash(f"Local '{nome}' atualizado com sucesso!", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Erro ao atualizar local: {str(e)}", "error")
+    finally:
+        conn.close()
+    return redirect(url_for('eleitoral.locais'))
 
 @eleitoral_bp.route('/distribuicao')
 def distribuicao():
@@ -1044,6 +1280,9 @@ def distribuicao():
     movimentos_raw = c.fetchall()
     movimentos = [dict(m) for m in movimentos_raw] if not is_pg else movimentos_raw
     
+    user_perfil = session.get('perfil')
+    user_local_id = session.get('eleitoral_local_id')
+    
     for m in movimentos:
         m_id = m['id']
         c.execute('''
@@ -1058,6 +1297,20 @@ def distribuicao():
             WHERE i.movimento_id = ?
         ''', (m_id,))
         m['itens'] = c.fetchall()
+        
+        estado_atual = m['estado']
+        idx_atual = ESTADOS_DISTRIBUICAO_ORDEM.get(estado_atual, 0)
+        m['ordem_estado'] = idx_atual
+        m['titulo_estado'] = TITULO_ESTADO.get(estado_atual, estado_atual)
+        m['proximos'] = [s for s, o in ESTADOS_DISTRIBUICAO_ORDEM.items() if o > idx_atual and o < ESTADOS_DISTRIBUICAO_ORDEM['RECEBIDO']]
+        
+        origem_id = m['local_origem_id']
+        destino_id = m['local_destino_id']
+        is_admin = user_perfil == 'admin'
+        is_origem = user_local_id is not None and origem_id == user_local_id
+        is_destino = user_local_id is not None and (destino_id == user_local_id)
+        m['pode_avancar'] = bool(is_admin or is_origem) and idx_atual < ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO']
+        m['pode_receber'] = idx_atual == ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO'] and (is_admin or is_destino)
     
     conn.close()
     
@@ -1066,7 +1319,9 @@ def distribuicao():
                            locais=locais,
                            tipos_material=tipos_material,
                            estoque=estoque,
-                           movimentos=movimentos)
+                           movimentos=movimentos,
+                           titulos_estado=TITULO_ESTADO,
+                           ordens_estado=ESTADOS_DISTRIBUICAO_ORDEM)
 
 @eleitoral_bp.route('/distribuicao/aquisicao', methods=['POST'])
 def nova_aquisicao():
@@ -1081,6 +1336,27 @@ def nova_aquisicao():
     
     conn, is_pg = get_eleitoral_db()
     c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
+    param_marker = '%s' if is_pg else '?'
+    
+    # Validação: a aquisição só é permitida num processo EM_CURSO do ano corrente ou futuro
+    c.execute(f"SELECT * FROM eleitoral_processo_eleitoral WHERE id = {param_marker}", (processo_id,))
+    processo = c.fetchone()
+    if not processo:
+        conn.close()
+        flash("Processo eleitoral não encontrado.", "error")
+        return redirect(url_for('eleitoral.distribuicao'))
+    if processo['estado' if is_pg else 'estado'] != 'EM_CURSO':
+        conn.close()
+        flash("Aquisição recusada: o processo eleitoral não está ativo (EM CURSO).", "error")
+        return redirect(url_for('eleitoral.distribuicao'))
+    try:
+        ano_processo = int(processo['ano' if is_pg else 'ano'])
+    except (TypeError, ValueError):
+        ano_processo = 0
+    if ano_processo < datetime.datetime.now().year:
+        conn.close()
+        flash("Aquisição recusada: o processo pertence a um ano já decorrido.", "error")
+        return redirect(url_for('eleitoral.distribuicao'))
     
     # Verifica se já existe registo deste material neste local para este processo
     if is_pg:
@@ -1132,13 +1408,18 @@ def nova_guia():
             # 1. Criar Guia (Movimento)
             param_marker = '%s' if is_pg else '?'
             if is_pg:
-                c.execute("INSERT INTO eleitoral_movimento_material (processo_id, local_origem_id, local_destino_id, estado, observacoes_envio, utilizador_envio_id) VALUES (%s, %s, %s, 'EM_TRANSITO', %s, %s) RETURNING id", 
+                c.execute("INSERT INTO eleitoral_movimento_material (processo_id, local_origem_id, local_destino_id, estado, observacoes_envio, utilizador_envio_id) VALUES (%s, %s, %s, 'EM_PREPARACAO', %s, %s) RETURNING id", 
                           (processo_id, local_origem_id, local_destino_id, observacoes, utilizador_id))
                 mov_id = c.fetchone()['id']
             else:
-                c.execute("INSERT INTO eleitoral_movimento_material (processo_id, local_origem_id, local_destino_id, estado, observacoes_envio, utilizador_envio_id) VALUES (?, ?, ?, 'EM_TRANSITO', ?, ?)", 
+                c.execute("INSERT INTO eleitoral_movimento_material (processo_id, local_origem_id, local_destino_id, estado, observacoes_envio, utilizador_envio_id) VALUES (?, ?, ?, 'EM_PREPARACAO', ?, ?)", 
                           (processo_id, local_origem_id, local_destino_id, observacoes, utilizador_id))
                 mov_id = c.lastrowid
+
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Regista o estado inicial no histórico
+            c.execute(f"INSERT INTO eleitoral_movimento_historico (movimento_id, estado, observacoes, data, utilizador_id) VALUES ({param_marker}, {param_marker}, {param_marker}, {param_marker}, {param_marker})",
+                      (mov_id, 'EM_PREPARACAO', observacoes or 'Criação da guia', now, utilizador_id))
                 
             # 2. Inserir itens e deduzir da origem
             for i in range(len(tipos_material_ids)):
@@ -1156,7 +1437,7 @@ def nova_guia():
                               (q_total, q_bom, q_mau, processo_id, local_origem_id, tm_id))
             
             conn.commit()
-            flash("Guia de distribuição criada e material está agora Em Trânsito!", "success")
+            flash("Guia de distribuição criada! O material está em fase de preparação.", "success")
         except Exception as e:
             conn.rollback()
             flash(f"Erro ao emitir guia: {str(e)}", "error")

@@ -276,8 +276,14 @@ def check_db_integrity(c):
         c.execute("UPDATE users SET setor_id = ? WHERE setor_id IS NULL", (ddgei_id,))
         if 'provincia_id' not in u_cols: c.execute("ALTER TABLE users ADD COLUMN provincia_id INTEGER")
         if 'permissoes_estado' not in u_cols: c.execute("ALTER TABLE users ADD COLUMN permissoes_estado TEXT")
+        if 'locais_acesso' not in u_cols: c.execute("ALTER TABLE users ADD COLUMN locais_acesso TEXT")
         
-        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material', 'equipamento_rastreio', 'equipamento_estado_historico']
+        try:
+            migrar_schema_eleitoral(c, False)
+        except Exception as ex:
+            print(f"[-] Erro na migração do schema eleitoral (SQLite): {ex}")
+        
+        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material', 'eleitoral_movimento_historico', 'equipamento_rastreio', 'equipamento_estado_historico']
         for t in tables:
             try:
                 c.execute(f"PRAGMA table_info({t})")
@@ -291,9 +297,37 @@ def check_db_integrity(c):
     except Exception as e:
         print(f"[-] Erro na verificação de integridade: {e}")
 
+def migrar_schema_eleitoral(c, is_pg):
+    """Cria/manuteni tabelas auxiliares do módulo eleitoral (histórico de movimento e hierarquia de locais)."""
+    if is_pg:
+        c.execute('''CREATE TABLE IF NOT EXISTS eleitoral_movimento_historico (
+            id SERIAL PRIMARY KEY,
+            movimento_id INTEGER,
+            estado VARCHAR,
+            observacoes VARCHAR,
+            data VARCHAR,
+            utilizador_id INTEGER,
+            last_modified VARCHAR DEFAULT '2026-06-24T00:00:00',
+            origem_registo VARCHAR DEFAULT 'local'
+        )''')
+        c.execute("ALTER TABLE eleitoral_local_armazenamento ADD COLUMN IF NOT EXISTS tem_filhos INTEGER DEFAULT 0")
+    else:
+        c.execute('''CREATE TABLE IF NOT EXISTS eleitoral_movimento_historico (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            movimento_id INTEGER,
+            estado TEXT,
+            observacoes TEXT,
+            data TEXT,
+            utilizador_id INTEGER
+        )''')
+        c.execute("PRAGMA table_info(eleitoral_local_armazenamento)")
+        la_cols = [row[1] for row in c.fetchall()]
+        if 'tem_filhos' not in la_cols:
+            c.execute("ALTER TABLE eleitoral_local_armazenamento ADD COLUMN tem_filhos INTEGER DEFAULT 0")
+
 def create_triggers(c):
     origem_padrao = os.environ.get("ORIGEM_CADASTRO") or "local"
-    tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material', 'equipamento_rastreio', 'equipamento_estado_historico']
+    tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material', 'eleitoral_movimento_historico', 'equipamento_rastreio', 'equipamento_estado_historico']
     for t in tables:
         c.execute(f'''
             CREATE TRIGGER IF NOT EXISTS tr_insert_{t}
@@ -410,6 +444,7 @@ def init_db():
 COMMON_HEAD = '''
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Ctext%20y='.9em'%20font-size='90'%3E%F0%9F%93%A6%3C/text%3E%3C/svg%3E">
     <style>
         :root { --primary: #1e293b; --accent: #10b981; --bg: #f8fafc; --border: #e2e8f0; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -463,6 +498,16 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''
 
 RELATORIOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD + """<title>Dashboard STAE - Relatórios</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+    .tabs { display:flex; gap:0.5rem; margin-bottom:1.5rem; flex-wrap:wrap; }
+    .tab { padding:0.6rem 1.2rem; border-radius:0.5rem; border:1px solid var(--border); cursor:pointer; background:white; color:#475569; font-weight:600; text-decoration:none; }
+    .tab.active { background:#3b82f6; color:white; border-color:#3b82f6; }
+    .toolbar { display:flex; gap:0.75rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1.5rem; }
+    .toolbar > div { flex:1; min-width:140px; }
+    .toolbar label { font-size:0.75rem; color:#64748b; font-weight:600; }
+    .table-wrap { overflow-x:auto; }
+    .table-wrap table td, .table-wrap table th { white-space:nowrap; }
+</style>
 </head>
 <body>
     <div class="nav">
@@ -470,7 +515,7 @@ RELATORIOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD 
         <div style="display:flex; align-items:center; gap:1rem;">
             <button onclick="syncManual()" class="btn btn-outline" style="background:transparent; color:white; border:1px solid rgba(255,255,255,0.3); padding:0.3rem 0.6rem; font-size:0.8rem">🔄 Sincronizar</button>
             <a href="/" class="btn btn-outline" style="background:white; color:#0f172a;">⬅️ Voltar ao Início</a>
-            <a href="/relatorios/export/excel?tab=inventario" class="btn btn-green">📊 Exportar Excel</a>
+            <a href="/relatorios/export/excel?tab={{ tab }}" class="btn btn-green">📊 Exportar Excel</a>
             <a href="/relatorio_pdf" target="_blank" class="btn btn-blue">📄 Imprimir Relatório PDF</a>
         </div>
     </div>
@@ -488,6 +533,117 @@ RELATORIOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD 
         <div class="card" style="margin-top:2rem">
             <h3 style="text-align:center">Resumo de Movimentos por Marca</h3>
             <canvas id="chartMarca"></canvas>
+        </div>
+
+        <div class="card" style="margin-top:2rem">
+            <h3 style="margin-bottom:1rem">Relatório de Dados</h3>
+            <div class="tabs">
+                <a href="/relatorios?tab=inventario" class="tab {% if tab == 'inventario' %}active{% endif %}">📦 Inventário</a>
+                <a href="/relatorios?tab=entradas_saidas" class="tab {% if tab == 'entradas_saidas' %}active{% endif %}">↔️ Entradas / Saídas</a>
+                <a href="/relatorios?tab=movimentos" class="tab {% if tab == 'movimentos' %}active{% endif %}">🚚 Movimentos</a>
+            </div>
+            <form method="GET" action="/relatorios" class="toolbar">
+                <input type="hidden" name="tab" value="{{ tab }}">
+                <div>
+                    <label>Setor</label>
+                    <select name="setor_id" style="margin-top:0.2rem;">
+                        <option value="">Todos</option>
+                        {% for s in setores %}<option value="{{ s.id }}" {% if selected_setor == s.id|string %}selected{% endif %}>{{ s.nome }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label>Marca</label>
+                    <select name="marca" style="margin-top:0.2rem;">
+                        <option value="">Todas</option>
+                        {% for m in marcas %}<option value="{{ m.nome }}" {% if selected_marca == m.nome %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label>Tipo de Equipamento</label>
+                    <select name="tipo_equipamento" style="margin-top:0.2rem;">
+                        <option value="">Todos</option>
+                        {% for t in tipos_eq %}<option value="{{ t.nome }}" {% if selected_tipo_eq == t.nome %}selected{% endif %}>{{ t.nome }}</option>{% endfor %}
+                    </select>
+                </div>
+                {% if tab in ('entradas_saidas', 'movimentos') %}
+                <div>
+                    <label>De</label>
+                    <input type="date" name="data_inicio" value="{{ data_inicio }}" style="margin-top:0.2rem;">
+                </div>
+                <div>
+                    <label>Até</label>
+                    <input type="date" name="data_fim" value="{{ data_fim }}" style="margin-top:0.2rem;">
+                </div>
+                {% endif %}
+                {% if tab == 'inventario' or tab == 'movimentos' %}
+                <div>
+                    <label>Status/Estado</label>
+                    <input type="text" name="status" value="{{ selected_status }}" placeholder="Ex: Disponível" style="margin-top:0.2rem;">
+                </div>
+                {% endif %}
+                {% if tab == 'movimentos' %}
+                <div>
+                    <label>Tipo de Movimento</label>
+                    <select name="mov_tipo" style="margin-top:0.2rem;">
+                        <option value="">Todos</option>
+                        <option value="ENTRADA" {% if mov_tipo == 'ENTRADA' %}selected{% endif %}>Entrada</option>
+                        <option value="SAIDA" {% if mov_tipo == 'SAIDA' %}selected{% endif %}>Saída</option>
+                        <option value="TRANSFERENCIA" {% if mov_tipo == 'TRANSFERENCIA' %}selected{% endif %}>Transferência</option>
+                    </select>
+                </div>
+                {% endif %}
+                <div style="flex:0 0 auto;">
+                    <button type="submit" class="btn btn-blue">Filtrar</button>
+                </div>
+            </form>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        {% if tab == 'inventario' %}
+                        <tr>
+                            <th>ID</th><th>Equipamento</th><th>Marca</th><th>Nº Série</th><th>Qtd</th><th>Estado</th><th>Data Registo</th><th>Setor</th><th>Observações</th>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <th>Guia</th><th>Tipo</th><th>Equipamento</th><th>Marca</th><th>Nº Série</th><th>Origem/Destino</th><th>Qtd</th><th>Data</th><th>Status</th><th>Técnico</th><th>Motivo</th>
+                        </tr>
+                        {% endif %}
+                    </thead>
+                    <tbody>
+                        {% for it in items %}
+                        {% if tab == 'inventario' %}
+                        <tr>
+                            <td>{{ it.id }}</td>
+                            <td>{{ it.equipamento }}</td>
+                            <td>{{ it.marca }}</td>
+                            <td>{{ it.numero_serie }}</td>
+                            <td>{{ it.quantidade }}</td>
+                            <td>{{ it.status }}</td>
+                            <td>{{ it.data_registo }}</td>
+                            <td>{{ it.setor_nome or '-' }}</td>
+                            <td>{{ it.observacoes or '-' }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td>{{ it.guia }}</td>
+                            <td>{{ it.tipo }}</td>
+                            <td>{{ it.equipamento }}</td>
+                            <td>{{ it.marca }}</td>
+                            <td>{{ it.numero_serie }}</td>
+                            <td>{{ it.origem_destino }}</td>
+                            <td>{{ it.quantidade }}</td>
+                            <td>{{ it.data }}</td>
+                            <td>{{ it.status }}</td>
+                            <td>{{ it.tecnico }}</td>
+                            <td>{{ it.motivo }}</td>
+                        </tr>
+                        {% endif %}
+                        {% else %}
+                        <tr><td colspan="11" style="text-align:center; color:#64748b;">Nenhum registo encontrado com os filtros seleccionados.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
     <script>
@@ -574,7 +730,7 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
             <button onclick="abrirBuscaBarcode()" class="btn btn-outline" style="background:#f1f5f9; color:#0f172a">🔍 Buscar por Código de Barras</button>
             {% if session.perfil == 'admin' %}
             <a href="/relatorios" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a"> 📊 Dashboard de Relatórios</a>
-            <a href="/cadastros" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a"> 📝 Cadastros</a>
+            <a href="/cadastros" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a"> ⚙️ Configurações</a>
             <a href="/eleitoral" class="btn btn-outline" style="background:#0369a1; color:white; font-weight:bold"> 🗳️ Gestão Eleitoral</a>
             {% endif %}
             <button id="syncBtn" onclick="syncCloud()" class="btn btn-outline" style="margin-left:auto; font-weight:bold; background:#10b981; color:white; border:none; cursor:pointer; display:flex; align-items:center; gap:0.5rem; padding:0.5rem 1rem; border-radius:0.5rem; transition: all 0.3s;">
@@ -1261,7 +1417,7 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                     html += '<div><strong>Estado:</strong> ' + ((it.estado||it.estado_rastreio||'-').replace(/_/g,' ')) + '</div>';
                     html += '<div><strong>Guia:</strong> ' + guia + '</div>';
                     html += '</div>';
-                    html += '<div style="margin-top:1rem;"><button class="btn btn-outline" onclick="buscarBarcodeRastreio(\'' + guia + '\')">📦 Ver Rastreio</button></div>';
+                    html += '<div style="margin-top:1rem;"><button class="btn btn-outline" onclick="buscarBarcodeRastreio(\\'' + guia + '\\')">📦 Ver Rastreio</button></div>';
                     html += '<div id="barcode_rastreio" style="margin-top:0.75rem;"></div>';
                     html += '</div>';
                     box.innerHTML = html;
@@ -1291,15 +1447,35 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
     </script>
 </body></html>'''
 
-CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<title>Cadastros - STAE</title>
+CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<title>Configurações - STAE</title>
 <style>
     .card table td { border-bottom: 1px solid #f1f5f9; padding: 0.5rem 0; }
 </style>
 </head>
 <body>
-    <div class="nav"><strong>STAE GESTÃO - ADMINISTRAÇÃO</strong><div style="display:flex; align-items:center; gap:1rem;"><button onclick="syncManual()" class="btn btn-outline" style="background:transparent; color:white; border:1px solid rgba(255,255,255,0.3); padding:0.3rem 0.6rem; font-size:0.8rem">🔄 Sincronizar</button><a href="/" style="color:white">⬅️ Voltar ao Início</a></div></div>
+    <div class="nav"><strong>STAE GESTÃO - CONFIGURAÇÕES</strong><div style="display:flex; align-items:center; gap:1rem;"><button onclick="syncManual()" class="btn btn-outline" style="background:transparent; color:white; border:1px solid rgba(255,255,255,0.3); padding:0.3rem 0.6rem; font-size:0.8rem">🔄 Sincronizar</button><a href="/" style="color:white">⬅️ Voltar ao Início</a></div></div>
     <div class="container">
         {% if msg %}<div style="background:#dcfce3; color:#166534; padding:1rem; border-radius:0.5rem; margin-bottom:1rem;">{{msg}}</div>{% endif %}
+        
+        <div class="card">
+            <h3>🔒 Alterar a minha palavra-passe</h3>
+            <p style="color:#64748b; font-size:0.9rem; margin-bottom:1rem;">Utilize esta secção para alterar a sua própria palavra-passe de acesso ao sistema.</p>
+            <form method="POST" action="/alterar_senha" style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
+                <div style="flex:1; min-width:180px;">
+                    <label>Palavra-passe atual</label>
+                    <input type="password" name="senha_atual" required>
+                </div>
+                <div style="flex:1; min-width:180px;">
+                    <label>Nova palavra-passe</label>
+                    <input type="password" name="nova_senha" required>
+                </div>
+                <div style="flex:1; min-width:180px;">
+                    <label>Confirmar nova palavra-passe</label>
+                    <input type="password" name="nova_senha2" required>
+                </div>
+                <button class="btn btn-blue">Alterar Palavra-passe</button>
+            </form>
+        </div>
         
         <div class="form-grid" style="grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 1.5rem;">
             <!-- Setores -->
@@ -1377,6 +1553,15 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         <option value="">Selecione o Setor (Opcional)</option>
                         {% for s in setores %}<option value="{{s.id}}">{{s.nome}}</option>{% endfor %}
                     </select>
+                    <div style="margin-top:0.75rem; font-size:0.85rem; color:#64748b;">
+                        <strong>Locais do Inventário que este utilizador pode aceder</strong><br>
+                        <small>Selecione os locais. Se não selecionar nenhum, terá acesso apenas ao seu setor. O Administrador vê sempre tudo.</small>
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem; max-height:110px; overflow-y:auto; border:1px solid var(--border); border-radius:0.5rem; padding:0.5rem;">
+                        {% for s in setores %}
+                        <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;"><input type="checkbox" name="locais_acesso" value="{{s.id}}" {% if not s_locals or s.id in s_locals %}checked{% endif %}> {{s.nome}}</label>
+                        {% endfor %}
+                    </div>
                     <select name="eleitoral_local_id">
                         <option value="">Selecione o Local Eleitoral (Opcional - STAE)</option>
                         {% for l in eleitoral_locais %}<option value="{{l.id}}">{{l.tipo}} - {{l.nome}}</option>{% endfor %}
@@ -1405,7 +1590,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                                 {% else %} · Estados: por setor{% endif %}</small>
                             </div>
                             <div style="display:flex; gap:0.25rem; align-items:center;">
-                                <button onclick="openEdit('/edit_user/{{u.id}}', 'Editar Usuário', [{label:'Nome Completo', name:'nome_completo', type:'text', value:'{{u.nome_completo}}', required:true}, {label:'Username', name:'username', type:'text', value:'{{u.username}}', required:true}, {label:'Perfil', name:'perfil', type:'select', value:'{{u.perfil}}', options:[{value:'admin',text:'Administrador'},{value:'tecnico',text:'Técnico'},{value:'protecao',text:'Protecção'}]}, {label:'Setor', name:'setor_id', type:'select', value:'{{u.setor_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for s in setores %}{value:'{{s.id}}',text:'{{s.nome}}'},{% endfor %}]}, {label:'Local Eleitoral', name:'eleitoral_local_id', type:'select', value:'{{u.eleitoral_local_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for l in eleitoral_locais %}{value:'{{l.id}}',text:'{{l.tipo}} - {{l.nome}}'},{% endfor %}]}, {label:'Permissões de Estados de Saída', name:'permissoes_estado', type:'checkboxes', value:'{{u.permissoes_estado or ""}}', options:[{value:'EM_PREPARACAO',text:'Preparação'},{value:'EMPACOTAMENTO',text:'Empacotamento'},{value:'A_ESPERA_ENVIO',text:'À espera de envio'},{value:'ENVIADO',text:'Enviado'},{value:'RECEBIDO',text:'Recebido'}]}, {label:'Nova Senha (Opcional)', name:'password', type:'password', value:'', required:false}])" class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem">Editar</button>
+                                <button onclick="openEdit('/edit_user/{{u.id}}', 'Editar Usuário', [{label:'Nome Completo', name:'nome_completo', type:'text', value:'{{u.nome_completo}}', required:true}, {label:'Username', name:'username', type:'text', value:'{{u.username}}', required:true}, {label:'Perfil', name:'perfil', type:'select', value:'{{u.perfil}}', options:[{value:'admin',text:'Administrador'},{value:'tecnico',text:'Técnico'},{value:'protecao',text:'Protecção'}]}, {label:'Setor', name:'setor_id', type:'select', value:'{{u.setor_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for s in setores %}{value:'{{s.id}}',text:'{{s.nome}}'},{% endfor %}]}, {label:'Local Eleitoral', name:'eleitoral_local_id', type:'select', value:'{{u.eleitoral_local_id or ""}}', options:[{value:'',text:'Nenhum'}, {% for l in eleitoral_locais %}{value:'{{l.id}}',text:'{{l.tipo}} - {{l.nome}}'},{% endfor %}]}, {label:'Locais do Inventário a que pode aceder', name:'locais_acesso', type:'checkboxes', value:'{{u.locais_acesso or ""}}', options:[{% for s in setores %}{value:'{{s.id}}',text:'{{s.nome}}'},{% endfor %}]}, {label:'Permissões de Estados de Saída', name:'permissoes_estado', type:'checkboxes', value:'{{u.permissoes_estado or ""}}', options:[{value:'EM_PREPARACAO',text:'Preparação'},{value:'EMPACOTAMENTO',text:'Empacotamento'},{value:'A_ESPERA_ENVIO',text:'À espera de envio'},{value:'ENVIADO',text:'Enviado'},{value:'RECEBIDO',text:'Recebido'}]}, {label:'Nova Senha (Opcional)', name:'password', type:'password', value:'', required:false}])" class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.8rem">Editar</button>
                                 <form method="POST" action="/delete_user/{{u.id}}" style="display:inline;" onsubmit="return confirm('Tem certeza que deseja remover este usuário?');">
                                     <button class="btn btn-danger" style="padding:0.2rem 0.5rem; font-size:0.8rem">Remover</button>
                                 </form>
@@ -1545,10 +1730,10 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
 
     <!-- Modals de Edição -->
     <div id="editModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; display:none; justify-content:center; align-items:center;">
-        <div class="card" style="width:400px; max-width:90%;">
+        <div class="card" style="width:460px; max-width:95%; max-height:92vh; overflow-y:auto;">
             <h3 id="editTitle">Editar</h3>
             <form id="editForm" method="POST" action="">
-                <div id="editFields" style="display:flex; flex-direction:column; gap:1rem; margin-bottom:1rem;"></div>
+                <div id="editFields" style="display:flex; flex-direction:column; gap:1rem; margin-bottom:1rem; max-height:60vh; overflow-y:auto; padding-right:0.5rem;"></div>
                 <div style="display:flex; gap:1rem;">
                     <button type="button" class="btn btn-outline" style="flex:1" onclick="document.getElementById('editModal').style.display='none'">Cancelar</button>
                     <button type="submit" class="btn btn-blue" style="flex:1">Salvar</button>
@@ -1574,11 +1759,15 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                 } else if(f.type === 'checkboxes') {
                     let html = `<label>${f.label}</label>`;
                     const current = String(f.value || '').split(',').map(s=>s.trim()).filter(Boolean);
+                    const marcarVazios = (f.name === 'locais_acesso') ? 'checked' : '';
                     f.options.forEach(o => {
-                        const checked = current.includes(o.value) ? 'checked' : '';
+                        const checked = current.includes(o.value) ? 'checked' : (current.length === 0 ? marcarVazios : '');
                         html += `<label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;"><input type="checkbox" name="${f.name}" value="${o.value}" ${checked}> ${o.text}</label>`;
                     });
-                    html += `<small style="color:#64748b;">Vazio = regra por setor (origem marca envio, destino marca recebido).</small>`;
+                    const nota = (f.name === 'locais_acesso')
+                        ? 'Vazio = apenas o próprio setor. Administrador vê sempre tudo.'
+                        : 'Vazio = regra por setor (origem marca envio, destino marca recebido).';
+                    html += `<small style="color:#64748b;">` + nota + `</small>`;
                     container.innerHTML += html;
                 } else {
                     container.innerHTML += `<label>${f.label}</label><input type="${f.type}" name="${f.name}" value="${f.value}" ${f.required?'required':''} placeholder="${f.placeholder||''}">`;
@@ -2485,6 +2674,14 @@ def login():
             res = c.fetchone()
             valid = False
             if res:
+                locais_acesso = ''
+                try:
+                    c.execute("SELECT locais_acesso FROM users WHERE id=?", (res[0],))
+                    la = c.fetchone()
+                    if la and la[0]:
+                        locais_acesso = la[0]
+                except Exception:
+                    pass
                 stored = res[5]
                 if stored and stored.startswith('pbkdf2:'):
                     valid = check_password_hash(stored, p)
@@ -2501,6 +2698,7 @@ def login():
                 session['nome_completo'] = res[2] or u
                 session['setor_id'] = res[3]
                 session['eleitoral_local_id'] = res[4]
+                session['locais_acesso'] = locais_acesso
                 return redirect(url_for('index'))
             else:
                 error_msg = f"<p style='color:red;'>Credenciais inválidas! BD: {'Nuvem' if is_cloud_mode() else 'Local'}<br>User digitado: '{u}'</p>"
@@ -2537,6 +2735,18 @@ def check_permissions():
     if request.endpoint in admin_only_endpoints:
         if session.get('perfil') != 'admin':
             return "Erro: Acesso negado. Apenas administradores t&ecirc;m permiss&atilde;o para aceder a esta p&aacute;gina.", 403
+
+
+def get_locais_acesso():
+    """Devolve a lista de locais de inventário (setor_id) a que o utilizador
+    pode aceder. Admin/None = todos os locais."""
+    if session.get('perfil') == 'admin':
+        return None
+    raw = session.get('locais_acesso', '')
+    if not raw:
+        sid = session.get('setor_id')
+        return [sid] if sid else []
+    return [int(x) for x in raw.split(',') if x.strip().isdigit()]
 
 
 MOVIMENTOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD + """<title>Todos os Movimentos - STAE</title>
@@ -2652,7 +2862,9 @@ def index():
     if is_admin:
         c.execute("SELECT * FROM movimentos ORDER BY id DESC LIMIT 50")
     else:
-        c.execute("SELECT * FROM movimentos WHERE setor_origem_id=? OR setor_destino_id=? ORDER BY id DESC LIMIT 50", (setor_id, setor_id))
+        locais = get_locais_acesso() or [0]
+        ph = ','.join('?' * len(locais))
+        c.execute(f"SELECT * FROM movimentos WHERE setor_origem_id IN ({ph}) OR setor_destino_id IN ({ph}) ORDER BY id DESC LIMIT 50", locais + locais)
     
     cols = [d[0] for d in c.description]
     movimentos = [dict(zip(cols, r)) for r in c.fetchall()]
@@ -2681,7 +2893,9 @@ def index():
     if is_admin:
         c.execute("SELECT id, equipamento, marca, numero_serie, quantidade FROM inventario_local WHERE status!='Pendente' ORDER BY equipamento")
     else:
-        c.execute("SELECT id, equipamento, marca, numero_serie, quantidade FROM inventario_local WHERE setor_id=? AND status!='Pendente' ORDER BY equipamento", (setor_id,))
+        locais = get_locais_acesso() or [0]
+        ph = ','.join('?' * len(locais))
+        c.execute(f"SELECT id, equipamento, marca, numero_serie, quantidade FROM inventario_local WHERE setor_id IN ({ph}) AND status!='Pendente' ORDER BY equipamento", locais)
     inv_items = []
     if c.description:
         inv_cols = [d[0] for d in c.description]
@@ -2728,7 +2942,9 @@ def movimentos():
     if is_admin:
         c.execute("SELECT * FROM movimentos ORDER BY id DESC")
     else:
-        c.execute("SELECT * FROM movimentos WHERE setor_origem_id=? OR setor_destino_id=? ORDER BY id DESC", (setor_id, setor_id))
+        locais = get_locais_acesso() or [0]
+        ph = ','.join('?' * len(locais))
+        c.execute(f"SELECT * FROM movimentos WHERE setor_origem_id IN ({ph}) OR setor_destino_id IN ({ph}) ORDER BY id DESC", locais + locais)
         
     cols = [d[0] for d in c.description]
     movs = [dict(zip(cols, r)) for r in c.fetchall()]
@@ -3043,6 +3259,11 @@ def api_movimento_info(guia):
 
 @app.route('/registrar_entrada', methods=['POST'])
 def registrar_entrada():
+    entregue_por = request.form.get('entregue_por', '').strip()
+    recebido_por = request.form.get('recebido_por', '').strip()
+    if not entregue_por or not recebido_por:
+        flash("Erro: É obrigatório indicar quem entregou e quem recebeu (funcionários).")
+        return redirect(url_for('index'))
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     guia = f"ENT-{datetime.now().year}-{len(c.execute('SELECT id FROM movimentos').fetchall())+1:04d}"
@@ -3062,9 +3283,14 @@ def registrar_entrada():
                 f.save(caminho)
                 documento_pdf = nome
     
+    numero_serie = request.form.get('numero_serie', '').strip()
+    motivo_entrada = request.form.get('motivo', '')
+    if 'repara' in motivo_entrada.lower() and (not numero_serie or numero_serie.upper() in ('N/A', 'NA', 'N/D', '-')):
+        numero_serie = guia
+        flash("Atenção: equipamento sem número de série. Foi registado o nº da guia de entrada como identificador.")
     c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, codigo_barras, documento_pdf, estado_rastreio) 
                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia, "ENTRADA", request.form['equipamento'], request.form['origem'], request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), "Em estoque", None, request.form['numero_serie'], request.form.get('marca',''), request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), request.form.get('quantidade', '1'), None, session.get('setor_id'), codigo_barras, documento_pdf, 'EM_ESTOQUE'))
+              (guia, "ENTRADA", request.form['equipamento'], request.form['origem'], motivo_entrada, datetime.now().strftime("%Y-%m-%d"), "Em estoque", None, numero_serie, request.form.get('marca',''), entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), request.form.get('quantidade', '1'), None, session.get('setor_id'), codigo_barras, documento_pdf, 'EM_ESTOQUE'))
     conn.commit()
     conn.close()
     return redirect(url_for('index'))
@@ -3072,6 +3298,11 @@ def registrar_entrada():
 @app.route('/registrar_saida', methods=['POST'])
 def registrar_saida():
     if 'username' not in session: return redirect(url_for('login'))
+    entregue_por = request.form.get('entregue_por', '').strip()
+    recebido_por = request.form.get('recebido_por', '').strip()
+    if not entregue_por or not recebido_por:
+        flash("Erro: É obrigatório indicar quem entregou e quem recebeu (funcionários).")
+        return redirect(url_for('index'))
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
@@ -3119,7 +3350,7 @@ def registrar_saida():
     
     c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, estado_rastreio) 
                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia, "SAIDA", request.form['equipamento'], origem_destino, request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), status_movimento, None, request.form['numero_serie'], request.form.get('marca',''), request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), str(qty_to_remove), setor_origem_id, setor_destino_id, estado_saida))
+              (guia, "SAIDA", request.form['equipamento'], origem_destino, request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), status_movimento, None, request.form['numero_serie'], request.form.get('marca',''), entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), str(qty_to_remove), setor_origem_id, setor_destino_id, estado_saida))
     conn.commit()
     conn.close()
     flash("Saída registada com sucesso!")
@@ -3127,6 +3358,12 @@ def registrar_saida():
 
 @app.route('/registrar_saida_reparacao/<original_guia>', methods=['POST'])
 def registrar_saida_reparacao(original_guia):
+    if 'username' not in session: return redirect(url_for('login'))
+    entregue_por = request.form.get('entregue_por', '').strip()
+    recebido_por = request.form.get('recebido_por', '').strip()
+    if not entregue_por or not recebido_por:
+        flash("Erro: É obrigatório indicar quem entregou e quem recebeu (funcionários).")
+        return redirect(url_for('index'))
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
@@ -3135,24 +3372,28 @@ def registrar_saida_reparacao(original_guia):
     if not original:
         conn.close()
         return "Movimento original não encontrado", 404
-        
-    guia_saida = f"SAI-{datetime.now().year}-{len(c.execute('SELECT id FROM movimentos').fetchall())+1:04d}"
+    
+    c.execute("SELECT numero_serie FROM movimentos WHERE guia=?", (original_guia,))
+    row_sn = c.fetchone()
+    numero_serie_original = row_sn[0] if row_sn else ''
+    # A guia de saída é uma variante da guia de entrada (guia de entrada mantém-se como identificador)
+    guia_saida = f"{original_guia}-SAI"
     
     equipamento = request.form.get('equipamento')
     marca = request.form.get('marca')
     numero_serie = request.form.get('numero_serie')
+    if numero_serie_original == original_guia:
+        numero_serie = numero_serie_original
     destino = request.form.get('destino')
     motivo = request.form.get('motivo', '')
     fornecedor = request.form.get('fornecedor', 'N/A')
     quantidade = request.form.get('quantidade', '1')
     
-    entregue_por = request.form.get('entregue_por', '')
-    recebido_por = request.form.get('recebido_por', '')
     agente_protecao = request.form.get('agente_protecao', '')
     
-    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade) 
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia_saida, "SAIDA", equipamento, destino, motivo, datetime.now().strftime("%Y-%m-%d"), "Entregue", None, numero_serie, marca, entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), agente_protecao, fornecedor, quantidade))
+    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, estado_rastreio) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
+              (guia_saida, "SAIDA", equipamento, destino, motivo, datetime.now().strftime("%Y-%m-%d"), "Entregue", None, numero_serie, marca, entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), agente_protecao, fornecedor, quantidade, session.get('setor_id'), None, 'EM_ESTOQUE'))
               
     novo_status = request.form.get('novo_status', 'Reparado e Entregue')
     c.execute("UPDATE movimentos SET status=? WHERE guia=?", (novo_status, original_guia))
@@ -3169,8 +3410,8 @@ def cadastros():
     setores = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome, cargo, setor_id FROM funcionarios")
     funcs = [{'id':r[0], 'nome':r[1], 'cargo':r[2], 'setor_id':r[3]} for r in c.fetchall()]
-    c.execute("SELECT id, username, perfil, nome_completo, setor_id, eleitoral_local_id, permissoes_estado FROM users")
-    users_data = [{'id':r[0], 'username':r[1], 'perfil':r[2], 'nome_completo':r[3] or r[1], 'setor_id':r[4], 'eleitoral_local_id': r[5], 'permissoes_estado': r[6] or ''} for r in c.fetchall()]
+    c.execute("SELECT id, username, perfil, nome_completo, setor_id, eleitoral_local_id, permissoes_estado, locais_acesso FROM users")
+    users_data = [{'id':r[0], 'username':r[1], 'perfil':r[2], 'nome_completo':r[3] or r[1], 'setor_id':r[4], 'eleitoral_local_id': r[5], 'permissoes_estado': r[6] or '', 'locais_acesso': r[7] or ''} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM marcas")
     marcas = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM tipos_equipamento")
@@ -3300,7 +3541,8 @@ def add_user():
         eleitoral_local_val = request.form.get('eleitoral_local_id')
         eleitoral_local_val = int(eleitoral_local_val) if (eleitoral_local_val and eleitoral_local_val != '' and eleitoral_local_val != 'None') else None
         permissoes = ','.join(request.form.getlist('permissoes_estado'))
-        c.execute("INSERT INTO users (username, password, perfil, nome_completo, setor_id, eleitoral_local_id, permissoes_estado) VALUES (?,?,?,?,?,?,?)", (request.form['username'], generate_password_hash(request.form['password']), request.form['perfil'], request.form.get('nome_completo'), setor_val, eleitoral_local_val, permissoes))
+        locais = ','.join(request.form.getlist('locais_acesso'))
+        c.execute("INSERT INTO users (username, password, perfil, nome_completo, setor_id, eleitoral_local_id, permissoes_estado, locais_acesso) VALUES (?,?,?,?,?,?,?,?)", (request.form['username'], generate_password_hash(request.form['password']), request.form['perfil'], request.form.get('nome_completo'), setor_val, eleitoral_local_val, permissoes, locais))
         conn.commit()
         msg = "Usuário adicionado com sucesso!"
     except:
@@ -3339,11 +3581,12 @@ def edit_user(id):
     eleitoral_local_id = request.form.get('eleitoral_local_id')
     eleitoral_local_val = int(eleitoral_local_id) if (eleitoral_local_id and eleitoral_local_id != '' and eleitoral_local_id != 'None') else None
     permissoes = ','.join(request.form.getlist('permissoes_estado'))
+    locais = ','.join(request.form.getlist('locais_acesso'))
     if pwd:
         hashed = generate_password_hash(pwd)
-        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, password=?, setor_id=?, eleitoral_local_id=?, permissoes_estado=? WHERE id=?", (nome_completo, username, perfil, hashed, setor_val, eleitoral_local_val, permissoes, id))
+        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, password=?, setor_id=?, eleitoral_local_id=?, permissoes_estado=?, locais_acesso=? WHERE id=?", (nome_completo, username, perfil, hashed, setor_val, eleitoral_local_val, permissoes, locais, id))
     else:
-        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, setor_id=?, eleitoral_local_id=?, permissoes_estado=? WHERE id=?", (nome_completo, username, perfil, setor_val, eleitoral_local_val, permissoes, id))
+        c.execute("UPDATE users SET nome_completo=?, username=?, perfil=?, setor_id=?, eleitoral_local_id=?, permissoes_estado=?, locais_acesso=? WHERE id=?", (nome_completo, username, perfil, setor_val, eleitoral_local_val, permissoes, locais, id))
     
     # Check if we are updating our own profile, and if so, update the session
     c.execute("SELECT username FROM users WHERE id=?", (id,))
@@ -3352,10 +3595,48 @@ def edit_user(id):
         session['nome'] = nome_completo or username
         session['perfil'] = perfil
         session['username'] = username
+        session['setor_id'] = setor_val
+        session['locais_acesso'] = locais
         
     conn.commit()
     conn.close()
     return redirect(url_for('cadastros', msg="Utilizador atualizado!"))
+
+@app.route('/alterar_senha', methods=['POST'])
+def alterar_senha():
+    if 'username' not in session: return redirect(url_for('login'))
+    senha_atual = request.form.get('senha_atual', '')
+    nova = request.form.get('nova_senha', '')
+    nova2 = request.form.get('nova_senha2', '')
+    if nova != nova2:
+        flash("Erro: as novas palavras-passe não coincidem.")
+        return redirect(url_for('cadastros'))
+    if len(nova) < 4:
+        flash("Erro: a nova palavra-passe deve ter pelo menos 4 caracteres.")
+        return redirect(url_for('cadastros'))
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT password FROM users WHERE username=?", (session['username'],))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        flash("Erro: utilizador não encontrado.")
+        return redirect(url_for('cadastros'))
+    stored = row[0]
+    valid = False
+    if stored and stored.startswith('pbkdf2:'):
+        valid = check_password_hash(stored, senha_atual)
+    elif stored:
+        valid = hashlib.md5(senha_atual.encode()).hexdigest() == stored
+    if not valid:
+        conn.close()
+        flash("Erro: palavra-passe atual incorreta.")
+        return redirect(url_for('cadastros'))
+    c.execute("UPDATE users SET password=? WHERE username=?", (generate_password_hash(nova), session['username']))
+    conn.commit()
+    conn.close()
+    flash("Palavra-passe alterada com sucesso!")
+    return redirect(url_for('cadastros'))
 
 
 @app.route('/edit_marca/<int:id>', methods=['POST'])
@@ -3893,6 +4174,31 @@ def relatorios():
         cols = [d[0] for d in c.description]
         items = [dict(zip(cols, r)) for r in c.fetchall()]
         
+    # Estatísticas para os gráficos
+    c.execute('''
+        SELECT COALESCE(equipamento, 'N/A') AS equipamento,
+               SUM(CASE WHEN tipo='ENTRADA' THEN COALESCE(CAST(quantidade AS INTEGER),1) ELSE 0 END) AS entradas,
+               SUM(CASE WHEN tipo IN ('SAIDA','TRANSFERENCIA') THEN COALESCE(CAST(quantidade AS INTEGER),1) ELSE 0 END) AS saidas
+        FROM movimentos GROUP BY equipamento ORDER BY equipamento''')
+    stat_equip = [dict(zip(['equipamento','entradas','saidas'], r)) for r in c.fetchall()]
+
+    c.execute('''
+        SELECT COALESCE(NULLIF(origem_destino,''),'N/A') AS origem,
+               COUNT(*) AS total
+        FROM movimentos WHERE tipo='ENTRADA' GROUP BY origem ORDER BY total DESC LIMIT 10''')
+    stat_setor = [dict(zip(['origem','total'], r)) for r in c.fetchall()]
+    if not stat_setor:
+        stat_setor = [{'origem': 'Sem dados', 'total': 0}]
+
+    c.execute('''
+        SELECT COALESCE(NULLIF(marca,''),'N/A') AS marca,
+               SUM(CASE WHEN tipo='ENTRADA' THEN COALESCE(CAST(quantidade AS INTEGER),1) ELSE 0 END) AS entradas,
+               SUM(CASE WHEN tipo IN ('SAIDA','TRANSFERENCIA') THEN COALESCE(CAST(quantidade AS INTEGER),1) ELSE 0 END) AS saidas
+        FROM movimentos GROUP BY marca ORDER BY marca''')
+    stat_marca = [dict(zip(['marca','entradas','saidas'], r)) for r in c.fetchall()]
+    if not stat_marca:
+        stat_marca = [{'marca': 'Sem dados', 'entradas': 0, 'saidas': 0}]
+
     conn.close()
     return render_template_string(
         RELATORIOS_TEMPLATE,
@@ -3907,7 +4213,10 @@ def relatorios():
         selected_tipo_eq=tipo_equipamento,
         data_inicio=data_inicio,
         data_fim=data_fim,
-        mov_tipo=mov_tipo
+        mov_tipo=mov_tipo,
+        stat_equip=json.dumps(stat_equip, ensure_ascii=False),
+        stat_setor=json.dumps(stat_setor, ensure_ascii=False),
+        stat_marca=json.dumps(stat_marca, ensure_ascii=False)
     )
 
 @app.route('/relatorios/export/<format_type>')
@@ -4244,15 +4553,17 @@ def inventario():
                      WHERE i.status != 'Pendente'
                      ORDER BY i.id DESC''')
     else:
-        c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
+        locais = get_locais_acesso() or [0]
+        ph = ','.join('?' * len(locais))
+        c.execute(f'''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
                             i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome,
                             i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome, i.documento_pdf, i.guia_origem
                      FROM inventario_local i 
                      LEFT JOIN setores s ON i.setor_id = s.id 
                      LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
-                     WHERE i.setor_id = ? AND i.status != 'Pendente'
-                     ORDER BY i.id DESC''', (setor_id,))
-                     
+                     WHERE i.setor_id IN ({ph}) AND i.status != 'Pendente'
+                     ORDER BY i.id DESC''', locais)
+
     cols = [d[0] for d in c.description]
     items = [dict(zip(cols, r)) for r in c.fetchall()]
     
@@ -4267,14 +4578,16 @@ def inventario():
                      WHERE i.status = 'Pendente'
                      ORDER BY i.id DESC''')
     else:
-        c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
+        locais = get_locais_acesso() or [0]
+        ph = ','.join('?' * len(locais))
+        c.execute(f'''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
                             i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome, i.guia_origem,
                             i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome
                      FROM inventario_local i 
                      LEFT JOIN setores s ON i.setor_id = s.id 
                      LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
-                     WHERE i.setor_id = ? AND i.status = 'Pendente'
-                     ORDER BY i.id DESC''', (setor_id,))
+                     WHERE i.setor_id IN ({ph}) AND i.status = 'Pendente'
+                     ORDER BY i.id DESC''', locais)
     cols_p = [d[0] for d in c.description]
     pending_items = [dict(zip(cols_p, r)) for r in c.fetchall()]
 
@@ -4303,17 +4616,19 @@ def inventario():
         c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status IN ('Danificado', 'Avariado')")
         danificados = c.fetchone()[0] or 0
     else:
-        c.execute("SELECT COUNT(*), SUM(quantidade) FROM inventario_local WHERE setor_id=? AND status != 'Pendente'", (setor_id,))
+        locais = get_locais_acesso() or [0]
+        ph = ','.join('?' * len(locais))
+        c.execute(f"SELECT COUNT(*), SUM(quantidade) FROM inventario_local WHERE setor_id IN ({ph}) AND status != 'Pendente'", locais)
         res = c.fetchone()
         total_qty = res[1] if res else 0
         
-        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE setor_id=? AND status='Disponível'", (setor_id,))
+        c.execute(f"SELECT SUM(quantidade) FROM inventario_local WHERE setor_id IN ({ph}) AND status='Disponível'", locais)
         disponiveis = c.fetchone()[0] or 0
         
-        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE setor_id=? AND status='Em uso'", (setor_id,))
+        c.execute(f"SELECT SUM(quantidade) FROM inventario_local WHERE setor_id IN ({ph}) AND status='Em uso'", locais)
         em_uso = c.fetchone()[0] or 0
         
-        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE setor_id=? AND status IN ('Danificado', 'Avariado')", (setor_id,))
+        c.execute(f"SELECT SUM(quantidade) FROM inventario_local WHERE setor_id IN ({ph}) AND status IN ('Danificado', 'Avariado')", locais)
         danificados = c.fetchone()[0] or 0
     
     stats = {
@@ -4746,9 +5061,14 @@ def init_pg_db():
             last_modified VARCHAR DEFAULT '2026-06-24T00:00:00',
             origem_registo VARCHAR DEFAULT 'local'
         )''')
+        try:
+            migrar_schema_eleitoral(c, True)
+        except Exception as ex:
+            conn.rollback()
+            print(f"[-] Erro na migração do schema eleitoral (PG): {ex}")
         
         # Ensure all columns exist in PostgreSQL (automatic migration)
-        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material', 'equipamento_rastreio', 'equipamento_estado_historico']
+        tables = ['users', 'setores', 'funcionarios', 'movimentos', 'marcas', 'tipos_equipamento', 'motivos', 'fornecedores', 'instituicoes', 'inventario_local', 'eleitoral_provincia', 'eleitoral_pais_diaspora', 'eleitoral_local_armazenamento', 'eleitoral_categoria_material', 'eleitoral_tipo_material', 'eleitoral_processo_eleitoral', 'eleitoral_material_sobrante', 'eleitoral_evento', 'eleitoral_movimento_material', 'eleitoral_movimento_historico', 'equipamento_rastreio', 'equipamento_estado_historico']
         
         # Create trigger function for PG
         try:
@@ -4798,6 +5118,7 @@ def init_pg_db():
         try:
             c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS setor_id INTEGER")
             c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS permissoes_estado VARCHAR")
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS locais_acesso VARCHAR")
             c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS setor_origem_id INTEGER")
             c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS setor_destino_id INTEGER")
         except Exception as ex:
