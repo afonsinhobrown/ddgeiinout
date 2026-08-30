@@ -33,6 +33,11 @@ Branch `main`. Últimos commits (do mais recente): `303e812` (corrige nome UGEA 
 
 **Sincronização RH concluída (2026-08-30)** — ver §4 e §5.
 
+**PORTALSTAE — IA Eleitoral (2026-08-30, commits `3ffeb52`→`222a2e7`, repo PORTALSTAE):**
+- **Fix produção:** `templates/recursoshumanos/relatorios/licencas.html` criado (estava em falta → `TemplateDoesNotExist` em `/rh/relatorios/licencas/`; pusheado no `3ffeb52` — **produção ainda precisa de deploy manual no Render**).
+- **RH inicia licença/avaliação/mensagem por funcionário** (`3ffeb52`): ação "Solicitar Licença" (RH escolhe funcionário), "Iniciar Avaliação" (`avaliacao pendente` sempre preenchida pelo chefe/diretor), "Enviar Mensagem Direta"; tipo **Dispensa** + migração `0004`; era o commit `222a2e7`? — não, `222a2e7` é a IA).
+- **IA Eleitoral em 2 passos** (`222a2e7`): 1º o prompt devolve **temas** (recursos humanos/equipamentos/círculos/material/etc.) sem varrer a BD; o utilizador escolhe um e só então a pesquisa profunda corre **só nesse tema** (sem misturar "planos logísticos"/"calendários"). Motor: `_pesquisar_modelo` sem `exists()`/`count()` totais (total = registos trazidos, "N+" quando cortado), orçamento de `ORCAMENTO_MODELOS=12` modelos contactados por consulta, fallback SQL só em modo geral. Benchmark: antes bloqueava >180s; agora descoberta <0.3s e profunda 1-10s (limite Neon). Fix `session_id` (varchar(100)) em `ConsultaIA`.
+
 **Estado real / verificação do dia:**
 - `app.py` e `routes_eleitoral.py` compilam (`ast.parse`, via script em temp — PowerShell não aceita heredoc/aspas triplas em `-c`).
 - Templates inline de `app.py` (`MAIN_TEMPLATE`, `CADASTROS_TEMPLATE`, `RELATORIOS_TEMPLATE`, `LOGIN_TEMPLATE`) e todos os templates de `templates/eleitoral/` renderizam via Jinja2.
