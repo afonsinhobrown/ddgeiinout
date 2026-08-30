@@ -109,7 +109,7 @@
     },
     {
       "codigo": "UGEA",
-      "nome": "Unidade de Gestão e Execução de Actividades",
+      "nome": "Unidade Gestora Executora de Aquisições",
       "tipo": "UNIDADE",
       "parent": "DG",
       "setores_ddgeiinout": [8]
