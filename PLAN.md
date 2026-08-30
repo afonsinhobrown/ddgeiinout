@@ -27,9 +27,11 @@ O módulo eleitoral usa `dual_execute()` (em `routes_eleitoral.py`) para escreve
 
 ## 3. Estado atual (2026-08-30)
 
-Branch `main`. Últimos commits (do mais recente): `eb54219` (normalizar status + perfil), `8fbc604` (docs), `0ecaa0a` (permissões por usuário, hash werkzeug, fix api_movimento_estado), `1d3f9f8` (controlo de permissões na mudança de estado), `d3dd16b` (docs), `db31329` (desvincular do DDGEI, usuários por local), `da7f5ae` (session user_id, check_permission, acentos), `8b410d1` (barcode, províncias, estados intermédios, imagem→PDF).
+Branch `main`. Últimos commits (do mais recente): `303e812` (corrige nome UGEA no organograma), `bb5b2b3` (inventário filtrado por local + anulação de movimentação + organograma), `eb54219` (normalizar status + perfil), `8fbc604` (docs), `0ecaa0a` (permissões por usuário, hash werkzeug, fix api_movimento_estado).
 
-**Working tree: 3 ficheiros modificados + 1 novo, a commitar** — inventário com filtro por local e botão "Inventário" generalizado; anulação de movimentação eleitoral por admin (repõe quantidades); `organograma_canonico.json` (base para futura sincronização de RH com o PORTALSTAE). Detalhe em §4.
+**Working tree: só `PLAN.md` modificado (este registo), a commitar.**
+
+**Sincronização RH concluída (2026-08-30)** — ver §4 e §5.
 
 **Estado real / verificação do dia:**
 - `app.py` e `routes_eleitoral.py` compilam (`ast.parse`, via script em temp — PowerShell não aceita heredoc/aspas triplas em `-c`).
@@ -41,7 +43,7 @@ Branch `main`. Últimos commits (do mais recente): `eb54219` (normalizar status 
 
 - [x] **Inventário por local** — botão "📦 Inventário DDGEI" → "📦 Inventário" (`MAIN_TEMPLATE`); `/inventario` abre no setor do utilizador (`session.setor_id`) e, para admin, permite filtrar por **um ou vários** locais (`?filtro_setor=1,2,3`); painel de filtro multi-select no template (admin: todos os setores; não-admin: só `locais_acesso`); título/nav dinâmicos ("INVENTÁRIO LOCAL - <local>")); itens/pendentes/estatísticas respeitam o filtro; coluna SETOR já presente.
 - [x] **Anular movimentação de material eleitoral** — nova rota `POST /eleitoral/distribuicao/<id>/anular` (admin): repõe quantidades na **origem** (inverte a dedução da guia) e **retira do destino** se a guia já estiver `RECEBIDO`; marca `estado='ANULADA'` e regista em `eleitoral_movimento_historico`. Botões "⛔ Anular" na tabela e no modal de fluxo (via `pode_anular`); guias anuladas não avançam nem recebem. **Validado end-to-end (SQLite):** origem 100/90/10 → 88/80/8 → anulação 100/90/10; destino 12/10/2 → 0/0/0; estado estável `ANULADA`; avanço e 2ª anulação bloqueados. Resíduos de teste limpos (SQLite+PG).
-- [x] **`organograma_canonico.json`** — criado em `gestao_stae/`: 16 áreas (setores ddgeiinout agrupados), 11 províncias (com `codigo_eleitoral`) e mapeamento de cargos→funções; fonte de verdade para futura sincronização de RH com o sistema **PORTALSTAE** (Django). Nota: nome da área **UGEA** a confirmar com o utilizador ("Unidade de Aquisição").
+- [x] **`organograma_canonico.json`** — criado em `gestao_stae/`: 16 áreas (setores ddgeiinout agrupados), 11 províncias (com `codigo_eleitoral`) e mapeamento de cargos→funções; fonte de verdade para a sincronização de RH com o sistema **PORTALSTAE** (Django). Nome da área **UGEA corrigido** para **"Unidade Gestora Executora de Aquisições"** (commit `303e812`).
 
 ## 4. ESTADO DE IMPLEMENTAÇÃO — DIA 2026-08-30 (COMMITADO EM `78d1116`/`2989d35`/`eb54219`)
 
@@ -126,6 +128,8 @@ Branch `main`. Últimos commits (do mais recente): `eb54219` (normalizar status 
 Nenhuma pendência em aberto. As pendências anteriores foram resolvidas a 2026-08-30 (ver RESOLVIDAS abaixo).
 
 ### RESOLVIDAS (2026-08-28/29/30)
+- ~~Sincronização de RH com o PORTALSTAE~~ — **implementada** e aplicada 2026-08-30 ao PG Neon: script `PORTALSTAE/sync_rh_ddgeiinout.py` (dry-run/--apply) lê `stae.db` + `organograma_canonico.json` e escreve em `recursoshumanos`. Resultado: setores 23→**27 ativos** (9 criados: DRS/DFIN/DPAT/DAQ/DPROT/GCI/GJUR/SG/UGEA; restantes renomeados/normalizados; **5 fictícios desativados** com `ativo=False` — DIRECÇÃO AAA, DEPARTAMENTO AAA, CDELGADO, MAPUTOC, MAPUTOP — em vez de delete, por FKs PROTECT externas no PORTALSTAE); funcionários 19→**42** (30 reais: 7 slots nacionais reatribuídos in-place preservando `id`/`numero_identificacao` + 23 novos com número/QR auto; os 12 "Gestor - <Província>" mantidos com sector provincial ligado). Chefes de área: DDGEI→Graça Simão, DRH→Júlio Dinís Devesse, DFIN→Eurico Matavel, DAQ→Saimon Massingue. Nomes/acentos do stae.db já estavam corretos (a "corrupção" era só do output do console).
+- ~~`organograma_canonico.json`: nome da área UGEA~~ — **corrigido** 2026-08-30 para **"Unidade Gestora Executora de Aquisições"** (commit `303e812`).
 - ~~`check_permission()` do módulo eleitoral refinar por perfil~~ — **resolvido** 2026-08-30: admin sempre; não-admin apenas `perfil='tecnico'` com `eleitoral_local_id` definido; `'protecao'` bloqueado (302 → `/`). Verificado por smoke test em SQLite e nuvem.
 - ~~Valores legados `'Disponvel'`/`'Indisponvel'` na BD~~ — **resolvido** 2026-08-30: literais corrigidos no código (já eram gravados sem acento em `app.py`) + UPDATE de normalização em `check_db_integrity` (SQLite) e `init_pg_db` (PG). Dados limpos em ambas as BDs (0 registos restantes).
 - ~~Revalidar modo Nuvem~~ — **resolvido** 2026-08-30: smoke test com `CLOUD_MODE=true` (rotas eleitorais 200 por admin/técnico, protecção 302); schema `tem_filhos` + `eleitoral_movimento_historico` confirmados no PG; normalização aplicada no PG.
