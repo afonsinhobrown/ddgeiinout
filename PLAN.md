@@ -27,9 +27,9 @@ O módulo eleitoral usa `dual_execute()` (em `routes_eleitoral.py`) para escreve
 
 ## 3. Estado atual (2026-08-30)
 
-Branch `main`. Últimos commits (do mais recente): `8fbc604` (docs), `0ecaa0a` (permissões por usuário, hash werkzeug, fix api_movimento_estado), `1d3f9f8` (controlo de permissões na mudança de estado), `d3dd16b` (docs), `db31329` (desvincular do DDGEI, usuários por local), `da7f5ae` (session user_id, check_permission, acentos), `8b410d1` (barcode, províncias, estados intermédios, imagem→PDF).
+Branch `main`. Últimos commits (do mais recente): `eb54219` (normalizar status + perfil), `8fbc604` (docs), `0ecaa0a` (permissões por usuário, hash werkzeug, fix api_movimento_estado), `1d3f9f8` (controlo de permissões na mudança de estado), `d3dd16b` (docs), `db31329` (desvincular do DDGEI, usuários por local), `da7f5ae` (session user_id, check_permission, acentos), `8b410d1` (barcode, províncias, estados intermédios, imagem→PDF).
 
-**Working tree NÃO limpa.** Grande bloco de trabalho de 2026-08-30 **NÃO commitado** (detalhe completo em §4).
+**Working tree: 3 ficheiros modificados + 1 novo, a commitar** — inventário com filtro por local e botão "Inventário" generalizado; anulação de movimentação eleitoral por admin (repõe quantidades); `organograma_canonico.json` (base para futura sincronização de RH com o PORTALSTAE). Detalhe em §4.
 
 **Estado real / verificação do dia:**
 - `app.py` e `routes_eleitoral.py` compilam (`ast.parse`, via script em temp — PowerShell não aceita heredoc/aspas triplas em `-c`).
@@ -37,7 +37,13 @@ Branch `main`. Últimos commits (do mais recente): `8fbc604` (docs), `0ecaa0a` (
 - `import app` e `import routes_eleitoral` OK em modo nuvem; `init_pg_db` + `migrar_schema_eleitoral` aplicados ao PG (coluna `tem_filhos` + tabela `eleitoral_movimento_historico`) e ao SQLite.
 - App corre em modo nuvem (PG) no ambiente atual; SQLite mantido pelo setup híbrido.
 
-## 4. ESTADO DE IMPLEMENTAÇÃO — DIA 2026-08-30 (NÃO COMMITADO)
+## 4. ESTADO DE IMPLEMENTAÇÃO — TAREFAS NOVAS 2026-08-30 (pós `eb54219`, A COMMITAR)
+
+- [x] **Inventário por local** — botão "📦 Inventário DDGEI" → "📦 Inventário" (`MAIN_TEMPLATE`); `/inventario` abre no setor do utilizador (`session.setor_id`) e, para admin, permite filtrar por **um ou vários** locais (`?filtro_setor=1,2,3`); painel de filtro multi-select no template (admin: todos os setores; não-admin: só `locais_acesso`); título/nav dinâmicos ("INVENTÁRIO LOCAL - <local>")); itens/pendentes/estatísticas respeitam o filtro; coluna SETOR já presente.
+- [x] **Anular movimentação de material eleitoral** — nova rota `POST /eleitoral/distribuicao/<id>/anular` (admin): repõe quantidades na **origem** (inverte a dedução da guia) e **retira do destino** se a guia já estiver `RECEBIDO`; marca `estado='ANULADA'` e regista em `eleitoral_movimento_historico`. Botões "⛔ Anular" na tabela e no modal de fluxo (via `pode_anular`); guias anuladas não avançam nem recebem. **Validado end-to-end (SQLite):** origem 100/90/10 → 88/80/8 → anulação 100/90/10; destino 12/10/2 → 0/0/0; estado estável `ANULADA`; avanço e 2ª anulação bloqueados. Resíduos de teste limpos (SQLite+PG).
+- [x] **`organograma_canonico.json`** — criado em `gestao_stae/`: 16 áreas (setores ddgeiinout agrupados), 11 províncias (com `codigo_eleitoral`) e mapeamento de cargos→funções; fonte de verdade para futura sincronização de RH com o sistema **PORTALSTAE** (Django). Nota: nome da área **UGEA** a confirmar com o utilizador ("Unidade de Aquisição").
+
+## 4. ESTADO DE IMPLEMENTAÇÃO — DIA 2026-08-30 (COMMITADO EM `78d1116`/`2989d35`/`eb54219`)
 
 **Núcleo (`gestao_stae/app.py`):**
 - [x] Botão/título **"Cadastros" → "Configurações"** (`MAIN_TEMPLATE` + `CADASTROS_TEMPLATE`).

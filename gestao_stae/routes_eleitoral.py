@@ -46,6 +46,7 @@ TITULO_ESTADO = {
     'ENVIADO': 'Enviado',
     'RECEBIDO': 'Recebido',
     'EM_TRANSITO': 'Em trânsito',
+    'ANULADA': 'Anulada',
 }
 
 def get_eleitoral_db():
@@ -967,6 +968,76 @@ def confirmar_rececao(id):
     return redirect(url_for('eleitoral.distribuicao'))
 
 
+@eleitoral_bp.route('/distribuicao/<int:id>/anular', methods=['POST'])
+def anular_movimento(id):
+    if session.get('perfil') != 'admin':
+        flash("Apenas administradores podem anular movimentações.", "error")
+        return redirect(url_for('eleitoral.distribuicao'))
+
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
+    param_marker = '%s' if is_pg else '?'
+    utilizador_id = session.get('user_id')
+
+    try:
+        c.execute(f"SELECT * FROM eleitoral_movimento_material WHERE id = {param_marker}", (id,))
+        mov = c.fetchone()
+
+        if not mov:
+            conn.close()
+            flash("Guia não encontrada.", "error")
+            return redirect(url_for('eleitoral.distribuicao'))
+
+        estado = mov['estado' if is_pg else 'estado']
+        if estado == 'ANULADA':
+            conn.close()
+            flash("Guia já se encontra anulada.", "error")
+            return redirect(url_for('eleitoral.distribuicao'))
+
+        processo_id = mov['processo_id' if is_pg else 'processo_id']
+        origem_id = mov['local_origem_id' if is_pg else 'local_origem_id']
+        destino_id = mov['local_destino_id' if is_pg else 'local_destino_id']
+        foi_recebida = estado == 'RECEBIDO'
+
+        c.execute(f"SELECT * FROM eleitoral_movimento_item WHERE movimento_id = {param_marker}", (id,))
+        itens = c.fetchall()
+
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        observacoes = (request.form.get('observacoes') or '').strip() or 'Guia anulada pelo administrador'
+
+        for item in itens:
+            tm_id = item['tipo_material_id' if is_pg else 'tipo_material_id']
+            q_bom = item['quantidade_bom' if is_pg else 'quantidade_bom']
+            q_mau = item['quantidade_mau' if is_pg else 'quantidade_mau']
+            q_total = q_bom + q_mau
+
+            # 1. Repor quantidades na origem (inverte a dedução feita ao emitir a guia)
+            c.execute(f"UPDATE eleitoral_material_sobrante SET quantidade_total = quantidade_total + {param_marker}, quantidade_bom = quantidade_bom + {param_marker}, quantidade_mau = quantidade_mau + {param_marker} WHERE processo_id = {param_marker} AND local_id = {param_marker} AND tipo_material_id = {param_marker}",
+                      (q_total, q_bom, q_mau, processo_id, origem_id, tm_id))
+
+            # 2. Se a guia já foi recebida, retira as quantidades do destino (inverte a soma da receção)
+            if foi_recebida:
+                c.execute(f"UPDATE eleitoral_material_sobrante SET quantidade_total = quantidade_total - {param_marker}, quantidade_bom = quantidade_bom - {param_marker}, quantidade_mau = quantidade_mau - {param_marker} WHERE processo_id = {param_marker} AND local_id = {param_marker} AND tipo_material_id = {param_marker}",
+                          (q_total, q_bom, q_mau, processo_id, destino_id, tm_id))
+
+        # 3. Marcar a guia como anulada e registar no histórico
+        c.execute(f"UPDATE eleitoral_movimento_material SET estado = 'ANULADA' WHERE id = {param_marker}", (id,))
+        c.execute(f"INSERT INTO eleitoral_movimento_historico (movimento_id, estado, observacoes, data, utilizador_id) VALUES ({param_marker}, {param_marker}, {param_marker}, {param_marker}, {param_marker})",
+                  (id, 'ANULADA', observacoes, now, utilizador_id))
+
+        conn.commit()
+        if foi_recebida:
+            flash("Guia anulada! Quantidades repostas na origem e retiradas do destino.", "success")
+        else:
+            flash("Guia anulada! Quantidades repostas na origem.", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Erro ao anular guia: {str(e)}", "error")
+
+    conn.close()
+    return redirect(url_for('eleitoral.distribuicao'))
+
+
 @eleitoral_bp.route('/api/mapa_distribuicao')
 def api_mapa_distribuicao():
     conn, is_pg = get_eleitoral_db()
@@ -1049,6 +1120,10 @@ def atualizar_estado_movimento(id):
             return redirect(url_for('eleitoral.distribuicao'))
         
         estado_atual = mov['estado' if is_pg else 'estado']
+        if estado_atual == 'ANULADA':
+            conn.close()
+            flash("Guia anulada não pode avançar de estado.", "error")
+            return redirect(url_for('eleitoral.distribuicao'))
         idx_novo = ESTADOS_DISTRIBUICAO_ORDEM[novo_estado]
         idx_atual = ESTADOS_DISTRIBUICAO_ORDEM.get(estado_atual, 0)
         
@@ -1118,15 +1193,17 @@ def api_movimento_fluxo(id):
         
         estado_atual = mov['estado' if is_pg else 'estado']
         idx_atual = ESTADOS_DISTRIBUICAO_ORDEM.get(estado_atual, 0)
+        anulada = estado_atual == 'ANULADA'
         
         user_perfil = session.get('perfil')
         user_local_id = session.get('eleitoral_local_id')
         is_admin = user_perfil == 'admin'
         origem_id = mov['local_origem_id' if is_pg else 'local_origem_id']
         destino_id = mov['local_destino_id' if is_pg else 'local_destino_id']
-        pode_avancar = bool(is_admin or (user_local_id and origem_id == user_local_id)) and idx_atual < ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO']
-        pode_receber = idx_atual == ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO'] and (is_admin or (user_local_id and destino_id == user_local_id))
-        proximos = [s for s, o in ESTADOS_DISTRIBUICAO_ORDEM.items() if o > idx_atual and o < ESTADOS_DISTRIBUICAO_ORDEM['RECEBIDO']]
+        pode_avancar = bool(is_admin or (user_local_id and origem_id == user_local_id)) and idx_atual < ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO'] and not anulada
+        pode_receber = idx_atual == ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO'] and (is_admin or (user_local_id and destino_id == user_local_id)) and not anulada
+        pode_anular = is_admin and not anulada
+        proximos = [s for s, o in ESTADOS_DISTRIBUICAO_ORDEM.items() if o > idx_atual and o < ESTADOS_DISTRIBUICAO_ORDEM['RECEBIDO']] if not anulada else []
         
         conn.close()
         return jsonify({
@@ -1137,6 +1214,7 @@ def api_movimento_fluxo(id):
             'estado_atual': estado_atual,
             'pode_avancar': pode_avancar,
             'pode_receber': pode_receber,
+            'pode_anular': pode_anular,
             'proximos': proximos,
         })
     except Exception as e:
@@ -1312,8 +1390,10 @@ def distribuicao():
         is_admin = user_perfil == 'admin'
         is_origem = user_local_id is not None and origem_id == user_local_id
         is_destino = user_local_id is not None and (destino_id == user_local_id)
-        m['pode_avancar'] = bool(is_admin or is_origem) and idx_atual < ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO']
-        m['pode_receber'] = idx_atual == ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO'] and (is_admin or is_destino)
+        m['anulada'] = estado_atual == 'ANULADA'
+        m['pode_avancar'] = bool(is_admin or is_origem) and idx_atual < ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO'] and not m['anulada']
+        m['pode_receber'] = idx_atual == ESTADOS_DISTRIBUICAO_ORDEM['ENVIADO'] and (is_admin or is_destino) and not m['anulada']
+        m['pode_anular'] = is_admin and not m['anulada']
     
     conn.close()
     

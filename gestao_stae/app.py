@@ -727,7 +727,7 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
     <div style="display:flex; gap:1rem; margin-bottom:2rem; justify-content:center; flex-wrap:wrap">
             <button onclick="show('ent')" class="btn btn-green">📥 Entrada</button>
             <button onclick="show('sai')" class="btn btn-blue">📤 Saída</button>
-            <a href="/inventario" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📦 Inventário DDGEI</a>
+            <a href="/inventario" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📦 Inventário</a>
             <a href="/movimentos" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📋 Todos os Movimentos</a>
             <button onclick="abrirBuscaBarcode()" class="btn btn-outline" style="background:#f1f5f9; color:#0f172a">🔍 Buscar por Código de Barras</button>
             {% if session.perfil == 'admin' %}
@@ -818,7 +818,7 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
             <h3>Nova Saída</h3>
             <form method="POST" action="/registrar_saida">
                 <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border: 1px dashed var(--border); margin-bottom: 1.5rem;">
-                    <label style="font-weight: bold; color: #1e293b; display: block; margin-bottom: 0.5rem;">📦 Retirar do Inventário Local DDGEI (Opcional)</label>
+                    <label style="font-weight: bold; color: #1e293b; display: block; margin-bottom: 0.5rem;">📦 Retirar do Inventário Local (Opcional)</label>
                     <select id="sai_selecao_inventario" onchange="preencherSaidaDoInventario(this.value)" style="margin-top: 0;">
                         <option value="">-- Escolha um item do inventário para preenchimento automático --</option>
                         {% for item in inv_items %}
@@ -1781,7 +1781,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
 </body></html>
 '''
 
-INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<title>Inventário Local - DDGEI</title>
+INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<title>{{ titulo_pagina }}</title>
 <style>
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
     .stat-card { background: white; padding: 1.5rem; border-radius: 0.75rem; border: 1px solid var(--border); text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
@@ -1817,7 +1817,7 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
 </head>
 <body>
     <div class="nav">
-        <strong>STAE GESTÃO - INVENTÁRIO LOCAL (DDGEI)</strong>
+        <strong>STAE GESTÃO - {{ titulo_pagina }}</strong>
         <div>
             <button id="syncBtn" onclick="syncCloud()" class="btn btn-outline" style="background:#10b981; color:white; border:none; margin-right:1rem; padding: 0.4rem 0.8rem; font-weight:bold; cursor:pointer; transition: all 0.3s;">🔄 Sincronizar Nuvem</button>
             <a href="/" class="btn btn-outline" style="background:white; color:#0f172a; margin-right:1.5rem; padding: 0.4rem 0.8rem;">⬅️ Voltar ao Início</a>
@@ -1826,6 +1826,24 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
     </div>
     <div class="container">
         {% if msg %}<div style="background:#dcfce3; color:#166534; padding:1rem; border-radius:0.5rem; margin-bottom:1rem;">{{msg}}</div>{% endif %}
+        
+        <div class="card" style="margin-bottom: 2rem;">
+            <form method="GET" action="/inventario" style="display:flex; flex-wrap:wrap; gap:1rem; align-items:flex-end;">
+                <div style="flex:1; min-width:250px;">
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Local (Setor) — visualize um ou vários</label>
+                    <select name="filtro_setor" multiple size="6" style="width:100%; margin-top:0.25rem;">
+                        {% for s in setores_filtro %}
+                        <option value="{{ s.id }}" {% if s.id in filtro_ativo_ids %}selected{% endif %}>{{ s.nome }}</option>
+                        {% endfor %}
+                    </select>
+                    <div style="font-size:0.75rem; color:#64748b; margin-top:0.25rem;">Segure Ctrl (ou Cmd) para escolher vários locais.</div>
+                </div>
+                <div style="display:flex; gap:0.5rem;">
+                    <button class="btn btn-blue" style="margin-top:0;">Filtrar</button>
+                    <a href="/inventario" class="btn btn-outline" style="margin-top:0; background:white;">Limpar</a>
+                </div>
+            </form>
+        </div>
         
         <div class="stats-grid">
             <div class="stat-card">
@@ -4544,52 +4562,54 @@ def inventario():
     setor_id = session.get('setor_id')
     is_admin = session.get('perfil') == 'admin'
     
-    # Base query for inventory (excluding Pending which is shown in a separate panel)
+    # Setores que o utilizador pode visualizar (localização do utilizador)
     if is_admin:
-        c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
-                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome,
-                            i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome, i.documento_pdf, i.guia_origem
-                     FROM inventario_local i 
-                     LEFT JOIN setores s ON i.setor_id = s.id 
-                     LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
-                     WHERE i.status != 'Pendente'
-                     ORDER BY i.id DESC''')
+        allowed = None  # o administrador pode aceder a todos os locais
     else:
-        locais = get_locais_acesso() or [0]
-        ph = ','.join('?' * len(locais))
-        c.execute(f'''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
-                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome,
-                            i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome, i.documento_pdf, i.guia_origem
-                     FROM inventario_local i 
-                     LEFT JOIN setores s ON i.setor_id = s.id 
-                     LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
-                     WHERE i.setor_id IN ({ph}) AND i.status != 'Pendente'
-                     ORDER BY i.id DESC''', locais)
+        locais = get_locais_acesso()
+        allowed = list(locais) if locais else ([setor_id] if setor_id else [0])
+    
+    # Filtro por local (setor): um ou vários, vindo do pedido
+    filtro_raw = request.args.get('filtro_setor', '')
+    if filtro_raw:
+        chosen = [int(x) for x in filtro_raw.split(',') if x.strip().isdigit()]
+    elif setor_id is not None:
+        chosen = [setor_id]
+    else:
+        chosen = None
+    
+    if allowed is not None:
+        chosen = [s for s in (chosen or []) if s in allowed] or allowed
+    
+    where_setor = ""
+    params = []
+    if chosen:
+        ph = ','.join('?' * len(chosen))
+        where_setor = f" AND i.setor_id IN ({ph})"
+        params = list(chosen)
+    
+    # Base query for inventory (excluding Pending which is shown in a separate panel)
+    c.execute(f'''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
+                        i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome,
+                        i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome, i.documento_pdf, i.guia_origem
+                 FROM inventario_local i 
+                 LEFT JOIN setores s ON i.setor_id = s.id 
+                 LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
+                 WHERE i.status != 'Pendente'{where_setor}
+                 ORDER BY i.id DESC''', params)
 
     cols = [d[0] for d in c.description]
     items = [dict(zip(cols, r)) for r in c.fetchall()]
     
-    # Load pending confirmation list for this sector (only for technicians) or all (admin)
-    if is_admin:
-        c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
-                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome, i.guia_origem,
-                            i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome
-                     FROM inventario_local i 
-                     LEFT JOIN setores s ON i.setor_id = s.id 
-                     LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
-                     WHERE i.status = 'Pendente'
-                     ORDER BY i.id DESC''')
-    else:
-        locais = get_locais_acesso() or [0]
-        ph = ','.join('?' * len(locais))
-        c.execute(f'''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
-                            i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome, i.guia_origem,
-                            i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome
-                     FROM inventario_local i 
-                     LEFT JOIN setores s ON i.setor_id = s.id 
-                     LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
-                     WHERE i.setor_id IN ({ph}) AND i.status = 'Pendente'
-                     ORDER BY i.id DESC''', locais)
+    # Load pending confirmation list (same scope as the inventory view)
+    c.execute(f'''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
+                        i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome, i.guia_origem,
+                        i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome
+                 FROM inventario_local i 
+                 LEFT JOIN setores s ON i.setor_id = s.id 
+                 LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
+                 WHERE i.status = 'Pendente'{where_setor}
+                 ORDER BY i.id DESC''', params)
     cols_p = [d[0] for d in c.description]
     pending_items = [dict(zip(cols_p, r)) for r in c.fetchall()]
 
@@ -4604,34 +4624,25 @@ def inventario():
     provincias_pendentes = [dict(zip(cols_pp, r)) for r in c.fetchall()]
     
     # Calculate stats selectively based on user scope
-    if is_admin:
-        c.execute("SELECT COUNT(*), SUM(quantidade) FROM inventario_local WHERE status != 'Pendente'")
-        res = c.fetchone()
-        total_qty = res[1] if res else 0
-        
-        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Disponível'")
-        disponiveis = c.fetchone()[0] or 0
-        
-        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Em uso'")
-        em_uso = c.fetchone()[0] or 0
-        
-        c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status IN ('Danificado', 'Avariado')")
-        danificados = c.fetchone()[0] or 0
+    if chosen:
+        cond_setor = " AND setor_id IN ({})".format(','.join('?' * len(chosen)))
+        stats_params = list(chosen)
     else:
-        locais = get_locais_acesso() or [0]
-        ph = ','.join('?' * len(locais))
-        c.execute(f"SELECT COUNT(*), SUM(quantidade) FROM inventario_local WHERE setor_id IN ({ph}) AND status != 'Pendente'", locais)
-        res = c.fetchone()
-        total_qty = res[1] if res else 0
-        
-        c.execute(f"SELECT SUM(quantidade) FROM inventario_local WHERE setor_id IN ({ph}) AND status='Disponível'", locais)
-        disponiveis = c.fetchone()[0] or 0
-        
-        c.execute(f"SELECT SUM(quantidade) FROM inventario_local WHERE setor_id IN ({ph}) AND status='Em uso'", locais)
-        em_uso = c.fetchone()[0] or 0
-        
-        c.execute(f"SELECT SUM(quantidade) FROM inventario_local WHERE setor_id IN ({ph}) AND status IN ('Danificado', 'Avariado')", locais)
-        danificados = c.fetchone()[0] or 0
+        cond_setor = ""
+        stats_params = []
+    
+    c.execute("SELECT COUNT(*), SUM(quantidade) FROM inventario_local WHERE status != 'Pendente'" + cond_setor, stats_params)
+    res = c.fetchone()
+    total_qty = res[1] if res else 0
+    
+    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Disponível'" + cond_setor, stats_params)
+    disponiveis = c.fetchone()[0] or 0
+    
+    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Em uso'" + cond_setor, stats_params)
+    em_uso = c.fetchone()[0] or 0
+    
+    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status IN ('Danificado', 'Avariado')" + cond_setor, stats_params)
+    danificados = c.fetchone()[0] or 0
     
     stats = {
         'total': total_qty or 0,
@@ -4642,6 +4653,19 @@ def inventario():
     
     c.execute("SELECT id, nome FROM setores")
     setores = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
+    if is_admin:
+        setores_filtro = setores
+    else:
+        setores_filtro = [s for s in setores if s['id'] in (allowed or [])]
+    filtro_ativo_ids = chosen or []
+    nome_setor = {s['id']: s['nome'] for s in setores}
+    if chosen is None:
+        filtro_nome = 'STAE (Todos os Locais)'
+    elif len(chosen) == 1:
+        filtro_nome = nome_setor.get(chosen[0], 'Inventário')
+    else:
+        filtro_nome = 'STAE ({} Locais)'.format(len(chosen))
+    titulo_pagina = 'INVENTÁRIO LOCAL - {}'.format(filtro_nome)
     c.execute("SELECT id, nome FROM marcas")
     marcas = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM tipos_equipamento")
@@ -4660,7 +4684,7 @@ def inventario():
     ]
     
     conn.close()
-    return render_template_string(INVENTARIO_TEMPLATE, items=items, pending_items=pending_items, provincias_pendentes=provincias_pendentes, stats=stats, setores=setores, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, provincias=provincias, estados_intermedios=estados_intermedios, msg=request.args.get('msg'))
+    return render_template_string(INVENTARIO_TEMPLATE, items=items, pending_items=pending_items, provincias_pendentes=provincias_pendentes, stats=stats, setores=setores, setores_filtro=setores_filtro, filtro_ativo_ids=filtro_ativo_ids, titulo_pagina=titulo_pagina, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, provincias=provincias, estados_intermedios=estados_intermedios, msg=request.args.get('msg'))
 
 @app.route('/inventario/add', methods=['POST'])
 def inventario_add():

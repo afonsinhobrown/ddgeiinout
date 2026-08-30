@@ -1,0 +1,145 @@
+{
+  "fonte": "ddgeiinout",
+  "descricao": "Organograma canónico das áreas da STAE. Fonte de verdade para a sincronização com recursoshumanos (PORTALSTAE). Corrigir aqui e re-sincronizar.",
+  "areas": [
+    {
+      "codigo": "DG",
+      "nome": "Direcção Geral",
+      "tipo": "DIRECAO_GERAL",
+      "parent": null,
+      "setores_ddgeiinout": []
+    },
+    {
+      "codigo": "DOOE",
+      "nome": "Direcção de Organização e Operações Eleitorais",
+      "tipo": "DIRECAO_NACIONAL",
+      "parent": "DG",
+      "setores_ddgeiinout": [7, 13]
+    },
+    {
+      "codigo": "DDGEI",
+      "nome": "Departamento de Delimitação, Geografia, Estatística e Informática",
+      "tipo": "DEPARTAMENTO_NACIONAL",
+      "parent": "DOOE",
+      "setores_ddgeiinout": [3, 15]
+    },
+    {
+      "codigo": "DRS",
+      "nome": "Departamento de Recenseamento e Sufrágio",
+      "tipo": "DEPARTAMENTO_NACIONAL",
+      "parent": "DOOE",
+      "setores_ddgeiinout": [1, 10]
+    },
+    {
+      "codigo": "DTRANS",
+      "nome": "Departamento dos Transportes",
+      "tipo": "DEPARTAMENTO_NACIONAL",
+      "parent": "DOOE",
+      "setores_ddgeiinout": [17]
+    },
+    {
+      "codigo": "RTRANS",
+      "nome": "Repartição dos Transportes",
+      "tipo": "REPARTICAO",
+      "parent": "DTRANS",
+      "setores_ddgeiinout": [18]
+    },
+    {
+      "codigo": "DAF",
+      "nome": "Direcção de Administração e Finanças",
+      "tipo": "DIRECAO_NACIONAL",
+      "parent": "DG",
+      "setores_ddgeiinout": []
+    },
+    {
+      "codigo": "DRH",
+      "nome": "Departamento de Recursos Humanos",
+      "tipo": "DEPARTAMENTO_NACIONAL",
+      "parent": "DAF",
+      "setores_ddgeiinout": [5, 11]
+    },
+    {
+      "codigo": "DFIN",
+      "nome": "Departamento das Finanças",
+      "tipo": "DEPARTAMENTO_NACIONAL",
+      "parent": "DAF",
+      "setores_ddgeiinout": [6, 12]
+    },
+    {
+      "codigo": "DPAT",
+      "nome": "Departamento de Património e Aprovisionamento",
+      "tipo": "DEPARTAMENTO_NACIONAL",
+      "parent": "DAF",
+      "setores_ddgeiinout": [2, 4]
+    },
+    {
+      "codigo": "DAQ",
+      "nome": "Departamento das Aquisições",
+      "tipo": "DEPARTAMENTO_NACIONAL",
+      "parent": "DAF",
+      "setores_ddgeiinout": [14]
+    },
+    {
+      "codigo": "DPROT",
+      "nome": "Departamento de Protecção",
+      "tipo": "DEPARTAMENTO_NACIONAL",
+      "parent": "DG",
+      "setores_ddgeiinout": [16]
+    },
+    {
+      "codigo": "GCI",
+      "nome": "Gabinete de Comunicação e Imagem",
+      "tipo": "GABINETE",
+      "parent": "DG",
+      "setores_ddgeiinout": [9]
+    },
+    {
+      "codigo": "GJUR",
+      "nome": "Gabinete Jurídico",
+      "tipo": "GABINETE",
+      "parent": "DG",
+      "setores_ddgeiinout": [19]
+    },
+    {
+      "codigo": "SG",
+      "nome": "Secretaria Geral",
+      "tipo": "SECRETARIA",
+      "parent": "DG",
+      "setores_ddgeiinout": [20]
+    },
+    {
+      "codigo": "UGEA",
+      "nome": "Unidade de Gestão e Execução de Actividades",
+      "tipo": "UNIDADE",
+      "parent": "DG",
+      "setores_ddgeiinout": [8]
+    }
+  ],
+  "provincias": [
+    {"codigo": "CMPT", "nome": "Cidade de Maputo", "tipo": "DIRECAO_PROVINCIAL", "codigo_eleitoral": "CMPT"},
+    {"codigo": "MPT", "nome": "Maputo", "tipo": "DIRECAO_PROVINCIAL", "codigo_eleitoral": "MPT"},
+    {"codigo": "GZA", "nome": "Gaza", "tipo": "DIRECAO_PROVINCIAL", "codigo_eleitoral": "GZA"},
+    {"codigo": "INH", "nome": "Inhambane", "tipo": "DIRECAO_PROVINCIAL", "codigo_eleitoral": "INH"},
+    {"codigo": "SOF", "nome": "Sofala", "tipo": "DIRECAO_PROVINCIAL", "codigo_eleitoral": "SOF"},
+    {"codigo": "MAN", "nome": "Manica", "tipo": "DIRECAO_PROVINCIAL", "codigo_eleitoral": "MAN"},
+    {"codigo": "TET", "nome": "Tete", "tipo": "DIRECAO_PROVINCIAL", "codigo_eleitoral": "TET"},
+    {"codigo": "ZAM", "nome": "Zambézia", "tipo": "DIRECAO_PROVINCIAL", "codigo_eleitoral": "ZAM"},
+    {"codigo": "NAM", "nome": "Nampula", "tipo": "DIRECAO_PROVINCIAL", "codigo_eleitoral": "NAM"},
+    {"codigo": "CDL", "nome": "Cabo Delgado", "tipo": "DIRECAO_PROVINCIAL", "codigo_eleitoral": "CDL"},
+    {"codigo": "NIA", "nome": "Niassa", "tipo": "DIRECAO_PROVINCIAL", "codigo_eleitoral": "NIA"}
+  ],
+  "funcao_ddgeiinout_para_rh": {
+    "DIRECTOR NACIONAL": "director",
+    "DIRECTORA NACIONAL": "director",
+    "DIRECTOR": "director",
+    "CHEFE DE DEPARTAMENTO": "chefe",
+    "CHEFE DE REPARTICAO": "chefe",
+    "CHEFE DE SECRETARIA": "chefe",
+    "TECNICO SUPERIOR": "tecnico_superior",
+    "TECNICA SUPERIOR": "tecnico_superior",
+    "TECNICA": "tecnico",
+    "TECNICO": "tecnico",
+    "AUXILIAR ADMINISTRATIVO": "auxiliar",
+    "": ""
+  }
+}

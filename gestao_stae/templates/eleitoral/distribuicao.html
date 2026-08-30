@@ -80,6 +80,9 @@
                             {% if m.estado == 'RECEBIDO' %}
                                 <span style="background:#bbf7d0; color:#166534; padding:0.2rem 0.5rem; border-radius:1rem; font-size:0.8rem; font-weight:bold;">Recebido</span><br>
                                 <span style="font-size:0.75rem; color:#64748b;">{{ m.data_recepcao }}</span>
+                            {% elif m.estado == 'ANULADA' %}
+                                <span style="background:#fecaca; color:#991b1b; padding:0.2rem 0.5rem; border-radius:1rem; font-size:0.8rem; font-weight:bold;">Anulada</span><br>
+                                <span style="font-size:0.75rem; color:#64748b;">{{ m.data_recepcao }}</span>
                             {% elif m.estado == 'ENVIADO' %}
                                 <span style="background:#bfdbfe; color:#1e3a8a; padding:0.2rem 0.5rem; border-radius:1rem; font-size:0.8rem; font-weight:bold;">Enviado</span>
                             {% elif m.estado == 'A_ESPERA_ENVIO' %}
@@ -97,6 +100,12 @@
                             {% if m.pode_receber %}
                             <form action="{{ url_for('eleitoral.confirmar_rececao', id=m.id) }}" method="POST" style="margin:0; display:inline;">
                                 <button type="submit" class="btn btn-blue" style="font-size:0.75rem; padding:0.3rem 0.6rem;" onclick="return confirm('Confirma a receção de todo o material descrito nesta guia?');">✔️ Receber</button>
+                            </form>
+                            {% endif %}
+                            {% if m.pode_anular %}
+                            <form action="{{ url_for('eleitoral.anular_movimento', id=m.id) }}" method="POST" style="margin:0; display:inline;">
+                                <input type="hidden" name="observacoes" value="">
+                                <button type="submit" class="btn btn-danger" style="font-size:0.75rem; padding:0.3rem 0.6rem;" onclick="return confirm('Anular esta guia e repor as quantidades na origem?');">⛔ Anular</button>
                             </form>
                             {% endif %}
                         </td>
@@ -192,14 +201,18 @@ const TITULO_ESTADOS = {
     'EMPACOTAMENTO': 'Empacotamento',
     'A_ESPERA_ENVIO': 'A aguardar envio',
     'ENVIADO': 'Enviado',
-    'RECEBIDO': 'Recebido'
+    'RECEBIDO': 'Recebido',
+    'EM_TRANSITO': 'Em trânsito',
+    'ANULADA': 'Anulada'
 };
 const ICONE_ESTADOS = {
     'EM_PREPARACAO': '📋',
     'EMPACOTAMENTO': '📦',
     'A_ESPERA_ENVIO': '⏳',
     'ENVIADO': '🚚',
-    'RECEBIDO': '✅'
+    'RECEBIDO': '✅',
+    'EM_TRANSITO': '🚚',
+    'ANULADA': '⛔'
 };
 
 function fecharFluxo() {
@@ -297,6 +310,13 @@ function abrirFluxo(movId) {
                 htmlAcoes += '<div style="margin-top:1rem;">' +
                     '<form action="/eleitoral/distribuicao/' + m.id + '/confirmar" method="POST" onsubmit="return confirm(\'Confirma a receção de todo o material descrito nesta guia?\');">' +
                     '<button type="submit" class="btn btn-blue" style="background:#16a34a;">✅ Confirmar Receção (somar ao stock)</button>' +
+                    '</form></div>';
+            }
+            if (dados.pode_anular) {
+                htmlAcoes += '<div style="margin-top:1rem;">' +
+                    '<form action="/eleitoral/distribuicao/' + m.id + '/anular" method="POST" onsubmit="return confirm(\'Anular esta guia e repor as quantidades na origem?\');">' +
+                    '<input type="hidden" name="observacoes" value="">' +
+                    '<button type="submit" class="btn btn-danger" style="background:#dc2626;">⛔ Anular Guia (repor quantidades)</button>' +
                     '</form></div>';
             }
             if (!htmlAcoes) {
