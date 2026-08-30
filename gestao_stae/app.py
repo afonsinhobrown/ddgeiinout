@@ -294,6 +294,8 @@ def check_db_integrity(c):
                     c.execute(f"ALTER TABLE {t} ADD COLUMN origem_registo TEXT DEFAULT 'local'")
             except Exception as ex:
                 print(f"[-] Erro ao verificar coluna last_modified na tabela {t}: {ex}")
+        c.execute("UPDATE inventario_local SET status='Disponível' WHERE status='Disponvel'")
+        c.execute("UPDATE inventario_local SET status='Indisponível' WHERE status='Indisponvel'")
     except Exception as e:
         print(f"[-] Erro na verificação de integridade: {e}")
 
@@ -3157,7 +3159,7 @@ def movimentar_provincia():
         r = c.fetchone()
         if r and int(r[0]) >= quantidade:
             novo = int(r[0]) - quantidade
-            ns = 'Disponvel' if novo > 0 else 'Indisponvel'
+            ns = 'Disponível' if novo > 0 else 'Indisponível'
             c.execute("UPDATE inventario_local SET quantidade=?, status=?, estado=? WHERE id=?", (novo, ns, estado, inv_id))
         else:
             conn.close()
@@ -3204,10 +3206,10 @@ def confirmar_recepcao_provincia(item_id):
         c.execute("SELECT id, quantidade FROM inventario_local WHERE provincia_id=? AND equipamento=? AND numero_serie=? AND marca=? AND id != ?", (provincia_id, equipamento, numero_serie, marca, item_id))
         existing = c.fetchone()
         if existing:
-            c.execute("UPDATE inventario_local SET quantidade=quantidade+?, status='Disponvel', estado='EM_ESTOQUE' WHERE id=?", (quantidade, existing[0]))
+            c.execute("UPDATE inventario_local SET quantidade=quantidade+?, status='Disponível', estado='EM_ESTOQUE' WHERE id=?", (quantidade, existing[0]))
             c.execute("DELETE FROM inventario_local WHERE id=?", (item_id,))
         else:
-            c.execute("UPDATE inventario_local SET status='Disponvel', estado='EM_ESTOQUE', guia_origem=NULL WHERE id=?", (item_id,))
+            c.execute("UPDATE inventario_local SET status='Disponível', estado='EM_ESTOQUE', guia_origem=NULL WHERE id=?", (item_id,))
         if guia:
             c.execute("UPDATE movimentos SET status='RECEBIDO', estado_rastreio='RECEBIDO', confirmado_destino=? WHERE guia=?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), guia))
             c.execute('''INSERT INTO equipamento_rastreio (guia, equipamento, numero_serie, estado, local_atual, observacoes, data, utilizador) VALUES (?,?,?,?,?,?,?,?)''',
@@ -3340,7 +3342,7 @@ def registrar_saida():
                     conn.close()
                     return redirect(url_for('index'))
                 new_qty = current_qty - qty_to_remove
-                new_status = 'Disponvel' if new_qty > 0 else 'Indisponvel'
+                new_status = 'Disponível' if new_qty > 0 else 'Indisponível'
                 c.execute("UPDATE inventario_local SET quantidade=?, status=? WHERE id=?", (new_qty, new_status, inv_id))
         except Exception as e:
             print(f"Erro ao atualizar inventrio: {e}")
@@ -4498,9 +4500,9 @@ def confirmar_recepcao(guia):
         inv = c.fetchone()
         qty = int(quantidade) if quantidade and str(quantidade).isdigit() else 1
         if inv:
-            c.execute("UPDATE inventario_local SET quantidade=quantidade+?, status='Disponvel' WHERE id=?", (qty, inv[0]))
+            c.execute("UPDATE inventario_local SET quantidade=quantidade+?, status='Disponível' WHERE id=?", (qty, inv[0]))
         else:
-            c.execute("INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, setor_id) VALUES (?,?,?,?,'Disponvel',?,?)",
+            c.execute("INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, setor_id) VALUES (?,?,?,?,'Disponível',?,?)",
                       (equipamento, marca, numero_serie, qty, datetime.now().strftime("%Y-%m-%d"), setor_destino_id))
         
         c.execute("UPDATE movimentos SET status='RECEBIDO', estado_rastreio='RECEBIDO', confirmado_destino=? WHERE guia=?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), guia))
@@ -4523,9 +4525,9 @@ def rejeitar_recepcao(guia):
             inv = c.fetchone()
             qty = int(quantidade) if quantidade and str(quantidade).isdigit() else 1
             if inv:
-                c.execute("UPDATE inventario_local SET quantidade=quantidade+?, status='Disponvel' WHERE id=?", (qty, inv[0]))
+                c.execute("UPDATE inventario_local SET quantidade=quantidade+?, status='Disponível' WHERE id=?", (qty, inv[0]))
             else:
-                c.execute("INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, setor_id) VALUES (?,?,?,?,'Disponvel',?,?)",
+                c.execute("INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, setor_id) VALUES (?,?,?,?,'Disponível',?,?)",
                           (equipamento, marca, numero_serie, qty, datetime.now().strftime("%Y-%m-%d"), setor_origem_id))
         c.execute("UPDATE movimentos SET status='REJEITADO' WHERE guia=?", (guia,))
         conn.commit()
@@ -5125,6 +5127,8 @@ def init_pg_db():
             conn.rollback()
             print(f"[-] Erro ao migrar novas colunas de setor no PG: {ex}")
                 
+        c.execute("UPDATE inventario_local SET status='Disponível' WHERE status='Disponvel'")
+        c.execute("UPDATE inventario_local SET status='Indisponível' WHERE status='Indisponvel'")
         conn.commit()
         print("[+] Tabelas inicializadas/verificadas no PostgreSQL Cloud.")
     except Exception as e:

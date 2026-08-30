@@ -117,21 +117,12 @@ Branch `main`. Últimos commits (do mais recente): `8fbc604` (docs), `0ecaa0a` (
 
 ## 5. PENDÊNCIAS ABERTAS (refinar)
 
-### Prioridade Alta
-
-- **[2026-08-30] Trabalho do dia — COMMITADO (`78d1116`).** Bloco completo do dia (Configurações, relatórios fix, entregue_por/recebido_por, reparação, locais_acesso, alterar senha, módulo eleitoral: fluxo de estados + histórico + Locais + Guia de Saída), 9 ficheiros, 1041 inserções. Detalhe em §4. Falta só revalidar funcional o modo Nuvem.
-
-- **[2026-08-29] Trabalho do dia — COMMITADO (`0ecaa0a`)**
-  - Permissões por usuário (`permissoes_estado`), bug `api_movimento_estado` corrigido, migração MD5→werkzeug, `edit_user`/`delete_user` só-admin, UI "Estado" no histórico, acentos, `debug` via env var. `_fix2.py`/`_fix_confirm.py` removidos.
-
-### Prioridade Média
-- **Permissões do Módulo Eleitoral** — `check_permission()` refinado (admin sempre permitido; não-admin exige `eleitoral_local_id`); ainda pode refinar por `perfil` consoante políticas. Guardado como evolutivo.
-
-### Prioridade Baixa / Cosmético
-- **Valores legados na BD** — status `'Disponvel'`/`'Indisponvel'` (sem acento) já gravados em `inventario_local.status`. Não é corrupção de UI; migrar apenas se quiser normalizar dados históricos (fora do código).
-- **Revalidar modo Nuvem (Neon)** quando a ligação estiver acessível (testes do dia correram sobre SQLite local; `init_pg_db` + sync já incluem `permissoes_estado`).
+Nenhuma pendência em aberto. As pendências anteriores foram resolvidas a 2026-08-30 (ver RESOLVIDAS abaixo).
 
 ### RESOLVIDAS (2026-08-28/29/30)
+- ~~`check_permission()` do módulo eleitoral refinar por perfil~~ — **resolvido** 2026-08-30: admin sempre; não-admin apenas `perfil='tecnico'` com `eleitoral_local_id` definido; `'protecao'` bloqueado (302 → `/`). Verificado por smoke test em SQLite e nuvem.
+- ~~Valores legados `'Disponvel'`/`'Indisponvel'` na BD~~ — **resolvido** 2026-08-30: literais corrigidos no código (já eram gravados sem acento em `app.py`) + UPDATE de normalização em `check_db_integrity` (SQLite) e `init_pg_db` (PG). Dados limpos em ambas as BDs (0 registos restantes).
+- ~~Revalidar modo Nuvem~~ — **resolvido** 2026-08-30: smoke test com `CLOUD_MODE=true` (rotas eleitorais 200 por admin/técnico, protecção 302); schema `tem_filhos` + `eleitoral_movimento_historico` confirmados no PG; normalização aplicada no PG.
 - ~~Relatórios: dashboard partido (stat_* ausentes)~~ — **resolvido** 2026-08-30 (RELATORIOS_TEMPLATE + stats + tabs).
 - ~~"Cadastros"/"Guia de Marcha"/"Brigada"~~ — **renomeados** 2026-08-30 ("Configurações", "Guia de Saída", hierarquia de Locais sem brigadas).
 - ~~Nova Aquisição sem validação de processo~~ — **resolvido** 2026-08-30 (exige processo EM_CURSO com ano ≥ corrente; ano default na UI).

@@ -104,9 +104,12 @@ def check_permission():
     perfil = session.get('perfil', '').lower()
     if perfil == 'admin':
         return True
-    # Outros perfis (técnico, protecção, etc.) apenas se tiverem um local
-    # eleitoral atribuído — condizente com users.eleitoral_local_id.
-    if session.get('eleitoral_local_id'):
+    # Política por perfil: apenas técnicos com local eleitoral atribuído acedem
+    # ao módulo de logística (users.eleitoral_local_id). Perfis como 'protecao'
+    # não têm acesso.
+    if perfil != 'tecnico':
+        return False
+    if session.get('eleitoral_local_id') is not None:
         return True
     return False
 
