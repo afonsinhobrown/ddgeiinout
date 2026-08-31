@@ -283,7 +283,7 @@ def processos():
 def iniciar_processo(id):
     conn, is_pg = get_eleitoral_db()
     c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
-    c.execute("UPDATE eleitoral_processo_eleitoral SET estado = 'EM_CURSO' WHERE id = ?", (id,) if not is_pg else (id,))
+    c.execute(f"UPDATE eleitoral_processo_eleitoral SET estado = 'EM_CURSO' WHERE id = {'%s' if is_pg else '?'}", (id,))
     conn.commit()
     conn.close()
     flash("Processo iniciado!", "success")
