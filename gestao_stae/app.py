@@ -313,6 +313,8 @@ def migrar_schema_eleitoral(c, is_pg):
             origem_registo VARCHAR DEFAULT 'local'
         )''')
         c.execute("ALTER TABLE eleitoral_local_armazenamento ADD COLUMN IF NOT EXISTS tem_filhos INTEGER DEFAULT 0")
+        c.execute("ALTER TABLE eleitoral_importacao_material ADD COLUMN IF NOT EXISTS caminho_ficheiro VARCHAR")
+        c.execute("ALTER TABLE eleitoral_importacao_material ADD COLUMN IF NOT EXISTS modo VARCHAR DEFAULT 'adicionar'")
     else:
         c.execute('''CREATE TABLE IF NOT EXISTS eleitoral_movimento_historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -326,6 +328,12 @@ def migrar_schema_eleitoral(c, is_pg):
         la_cols = [row[1] for row in c.fetchall()]
         if 'tem_filhos' not in la_cols:
             c.execute("ALTER TABLE eleitoral_local_armazenamento ADD COLUMN tem_filhos INTEGER DEFAULT 0")
+        c.execute("PRAGMA table_info(eleitoral_importacao_material)")
+        imp_cols = [row[1] for row in c.fetchall()]
+        if 'caminho_ficheiro' not in imp_cols:
+            c.execute("ALTER TABLE eleitoral_importacao_material ADD COLUMN caminho_ficheiro TEXT")
+        if 'modo' not in imp_cols:
+            c.execute("ALTER TABLE eleitoral_importacao_material ADD COLUMN modo TEXT DEFAULT 'adicionar'")
 
 def create_triggers(c):
     origem_padrao = os.environ.get("ORIGEM_CADASTRO") or "local"
@@ -522,22 +530,7 @@ RELATORIOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD 
         </div>
     </div>
     <div class="container">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem;">
-            <div class="card">
-                <h3 style="text-align:center">Movimentos por Tipo de Equipamento</h3>
-                <canvas id="chartEquip"></canvas>
-            </div>
-            <div class="card">
-                <h3 style="text-align:center">Entradas por Setor/Origem</h3>
-                <canvas id="chartSetor"></canvas>
-            </div>
-        </div>
-        <div class="card" style="margin-top:2rem">
-            <h3 style="text-align:center">Resumo de Movimentos por Marca</h3>
-            <canvas id="chartMarca"></canvas>
-        </div>
-
-        <div class="card" style="margin-top:2rem">
+        <div class="card" style="margin-top:1rem">
             <h3 style="margin-bottom:1rem">Relatório de Dados</h3>
             <div class="tabs">
                 <a href="/relatorios?tab=inventario" class="tab {% if tab == 'inventario' %}active{% endif %}">📦 Inventário</a>
@@ -647,6 +640,21 @@ RELATORIOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD 
                 </table>
             </div>
         </div>
+
+        <div style="margin-top:2rem; display:grid; grid-template-columns:1fr 1fr; gap:2rem;">
+            <div class="card">
+                <h3 style="text-align:center">Movimentos por Tipo de Equipamento</h3>
+                <canvas id="chartEquip"></canvas>
+            </div>
+            <div class="card">
+                <h3 style="text-align:center">Entradas por Setor/Origem</h3>
+                <canvas id="chartSetor"></canvas>
+            </div>
+        </div>
+        <div class="card" style="margin-top:2rem">
+            <h3 style="text-align:center">Resumo de Movimentos por Marca</h3>
+            <canvas id="chartMarca"></canvas>
+        </div>
     </div>
     <script>
         const dataEquip = {{ stat_equip | safe }};
@@ -745,7 +753,20 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
 
         <div id="ent" class="card hidden">
             <h3>Nova Entrada</h3>
+            <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:0.5rem; padding:0.8rem 1rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.8rem;">
+                <input type="checkbox" id="modo_inventario" name="modo_inventario" value="1" onchange="toggleModoInventario()" style="width:18px; height:18px; cursor:pointer;">
+                <label for="modo_inventario" style="cursor:pointer; font-weight:600; color:#0369a1; margin:0;">📦 Modo Inventário</label>
+                <span style="font-size:0.82rem; color:#64748b;">Ative para registar material directamente no inventário de um local (sem origem obrigatória)</span>
+            </div>
             <form method="POST" action="/registrar_entrada" enctype="multipart/form-data">
+                <input type="hidden" name="modo_inventario" id="modo_inventario_hidden" value="">
+                <div id="inv_destino_row" style="display:none; background:#f0fdf4; border:1px solid #86efac; border-radius:0.5rem; padding:0.8rem 1rem; margin-bottom:1rem;">
+                    <label style="font-weight:600; color:#166534;">📍 Local de Destino (Inventário) *</label>
+                    <select name="destino_inventario" id="destino_inventario" style="margin-top:0.4rem; width:100%; padding:0.5rem;">
+                        <option value="">-- Selecione o local onde o material será registado --</option>
+                        {% for s in setores %}<option value="{{s.id}}" {% if s.id == session.setor_id %}selected{% endif %}>{{s.nome}}</option>{% endfor %}
+                    </select>
+                </div>
                 <div class="form-grid">
                     <div><label>Equipamento (Tipo)</label>
                         <select name="equipamento" required>
@@ -760,8 +781,8 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                         </select>
                     </div>
                     <div><label>S/N / Nº Série</label><input name="numero_serie" required placeholder="Ex: 1234 ou N/A"></div>
-                    <div><label>Origem</label>
-                        <select name="origem" required>
+                    <div><label id="ent_origem_label">Origem</label>
+                        <select name="origem" id="ent_origem_select">
                             <option value="">-- Selecione --</option>
                             <optgroup label="Setores Internos">
                                 {% for s in setores %}<option value="SETOR_{{s.id}}">{{s.nome}}</option>{% endfor %}
@@ -923,8 +944,8 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                     <td style="padding:1rem"><strong>{{m.guia[:8]}}</strong><br>{{m.guia[8:]}}</td>
                     <td style="padding:1rem">{{m.equipamento}}<br><small style="color:#64748b">({{m.marca}})</small></td>
                     <td style="padding:1rem">{{m.numero_serie}}</td>
-                    <td style="padding:1rem">{% if m.tipo == 'ENTRADA' %}{{ m.origem_destino or m.local_origem or '-' }}{% else %}{{ m.local_origem or 'DDGEI' }}{% endif %}</td>
-                    <td style="padding:1rem">{% if m.tipo == 'SAIDA' %}{{ m.origem_destino or m.local_destino or '-' }}{% else %}{{ m.local_destino or 'DDGEI' }}{% endif %}</td>
+                    <td style="padding:1rem">{% if m.tipo == 'ENTRADA' %}{{ m.origem_destino or m.setor_origem_nome or 'Inventário Directo' }}{% else %}{{ m.setor_origem_nome or m.local_origem or m.origem_destino or '-' }}{% endif %}</td>
+                    <td style="padding:1rem">{% if m.tipo == 'SAIDA' %}{{ m.origem_destino or m.setor_destino_nome or m.local_destino or '-' }}{% else %}{{ m.setor_destino_nome or m.local_destino or 'Inventário Directo' }}{% endif %}</td>
                     <td style="padding:1rem">{{ (m.estado_rastreio or m.status or '').replace('_',' ') }}</td>
                     <td style="padding:1rem">{{m.data[:10]}}<br><small style="color:#64748b">{{m.data[11:]}}</small></td>
                     <td style="padding:1rem">
@@ -1093,6 +1114,23 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                         if(tr[i+1]) tr[i+1].classList.add("hidden");
                     }
                 }
+            }
+        }
+        function toggleModoInventario() {
+            const on = document.getElementById('modo_inventario').checked;
+            document.getElementById('modo_inventario_hidden').value = on ? '1' : '';
+            const destRow = document.getElementById('inv_destino_row');
+            const origemSel = document.getElementById('ent_origem_select');
+            const origemLabel = document.getElementById('ent_origem_label');
+            if (on) {
+                destRow.style.display = 'block';
+                origemSel.removeAttribute('required');
+                origemLabel.innerHTML = 'Origem <small style="color:#94a3b8">(opcional em inventário)</small>';
+            } else {
+                destRow.style.display = 'none';
+                document.getElementById('destino_inventario').value = '';
+                origemSel.setAttribute('required', 'required');
+                origemLabel.innerHTML = 'Origem';
             }
         }
         function showReparacaoModal() {
@@ -2703,7 +2741,7 @@ def login():
                 except Exception:
                     pass
                 stored = res[5]
-                if stored and stored.startswith('pbkdf2:'):
+                if stored and ':' in stored and not stored.startswith('md5'):
                     valid = check_password_hash(stored, p)
                 elif stored:
                     valid = hashlib.md5(p.encode()).hexdigest() == stored
@@ -2815,7 +2853,8 @@ MOVIMENTOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD 
                     <th style="padding:1rem">GUIA</th>
                     <th style="padding:1rem">EQUIPAMENTO</th>
                     <th style="padding:1rem">S/N</th>
-                    <th style="padding:1rem">ORIGEM/DESTINO</th>
+                    <th style="padding:1rem">ORIGEM</th>
+                    <th style="padding:1rem">DESTINO</th>
                     <th style="padding:1rem">STATUS</th>
                     <th style="padding:1rem">DATA</th>
                     <th style="padding:1rem">ACÇÕES</th>
@@ -2825,7 +2864,8 @@ MOVIMENTOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD 
                     <td style="padding:1rem"><strong>{{m.guia[:8]}}</strong><br>{{m.guia[8:]}}</td>
                     <td style="padding:1rem">{{m.equipamento}}<br><small style="color:#64748b">({{m.marca}})</small></td>
                     <td style="padding:1rem">{{m.numero_serie}}</td>
-                    <td style="padding:1rem">{{m.origem_destino}}</td>
+                    <td style="padding:1rem">{% if m.tipo == 'ENTRADA' %}{{ m.origem_destino or m.setor_origem_nome or 'Inventário Directo' }}{% else %}{{ m.setor_origem_nome or m.local_origem or m.origem_destino or '-' }}{% endif %}</td>
+                    <td style="padding:1rem">{% if m.tipo == 'SAIDA' %}{{ m.origem_destino or m.setor_destino_nome or m.local_destino or '-' }}{% else %}{{ m.setor_destino_nome or m.local_destino or 'Inventário Directo' }}{% endif %}</td>
                     <td style="padding:1rem">
                         {% if m.status == 'PENDENTE_RECEPCAO' %}
                             <span style="background:#fef3c7; color:#d97706; padding:0.2rem 0.5rem; border-radius:0.3rem; font-size:0.8rem; font-weight:bold;">Pendente Confirmação</span>
@@ -2850,7 +2890,7 @@ MOVIMENTOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD 
                     </td>
                 </tr>
                 <tr id="det_{{loop.index}}" class="hidden" style="background:#f8fafc; display:none;">
-                    <td colspan="7" style="padding:1rem; border-bottom:1px solid var(--border)">
+                    <td colspan="8" style="padding:1rem; border-bottom:1px solid var(--border)">
                         <div style="display:flex; gap:2rem; font-size:0.85rem; color:#475569; flex-wrap:wrap">
                             <div><strong>Motivo:</strong> {{m.motivo or '-'}}</div>
                             <div><strong>Técnico do Sistema:</strong> {{m.tecnico or '-'}}</div>
@@ -2891,11 +2931,17 @@ def index():
     
     c.execute("SELECT id, nome FROM funcionarios")
     func_map = {str(r[0]): r[1] for r in c.fetchall()}
+    c.execute("SELECT id, nome FROM setores")
+    setor_map = {int(r[0]): r[1] for r in c.fetchall()}
     
     for m in movimentos:
         m['entregue_nome'] = func_map.get(str(m.get('entregue_por')), m.get('entregue_por') or '-')
         m['recebido_nome'] = func_map.get(str(m.get('recebido_por')), m.get('recebido_por') or '-')
         m['protecao_nome'] = func_map.get(str(m.get('agente_protecao')), m.get('agente_protecao') or '-')
+        so = m.get('setor_origem_id')
+        sd = m.get('setor_destino_id')
+        m['setor_origem_nome'] = setor_map.get(int(so), '') if so else ''
+        m['setor_destino_nome'] = setor_map.get(int(sd), '') if sd else ''
         
     # Fetch pending receptions
     pendentes = []
@@ -2972,10 +3018,17 @@ def movimentos():
     c.execute("SELECT id, nome FROM funcionarios")
     func_map = {str(r[0]): r[1] for r in c.fetchall()}
     
+    c.execute("SELECT id, nome FROM setores")
+    setor_map = {int(r[0]): r[1] for r in c.fetchall()}
+    
     for m in movs:
         m['entregue_nome'] = func_map.get(str(m.get('entregue_por')), m.get('entregue_por') or '-')
         m['recebido_nome'] = func_map.get(str(m.get('recebido_por')), m.get('recebido_por') or '-')
         m['protecao_nome'] = func_map.get(str(m.get('agente_protecao')), m.get('agente_protecao') or '-')
+        so = m.get('setor_origem_id')
+        sd = m.get('setor_destino_id')
+        m['setor_origem_nome'] = setor_map.get(int(so), '') if so else ''
+        m['setor_destino_nome'] = setor_map.get(int(sd), '') if sd else ''
         
     conn.close()
     return render_template_string(MOVIMENTOS_TEMPLATE, movimentos=movs, meu_setor=setor_id, is_admin=is_admin)
@@ -3288,6 +3341,29 @@ def registrar_entrada():
     c = conn.cursor()
     guia = f"ENT-{datetime.now().year}-{len(c.execute('SELECT id FROM movimentos').fetchall())+1:04d}"
     
+    modo_inventario = request.form.get('modo_inventario') == '1'
+    origem_raw = request.form.get('origem', '').strip()
+    
+    if modo_inventario:
+        destino_inv = request.form.get('destino_inventario', '').strip()
+        if not destino_inv:
+            flash("Erro: Em modo inventário é obrigatório indicar o local de destino.")
+            conn.close()
+            return redirect(url_for('index'))
+        setor_destino_id = int(destino_inv)
+        setor_origem_id = None
+        if origem_raw.startswith("SETOR_"):
+            setor_origem_id = int(origem_raw.split("_")[1])
+        origem_destino = origem_raw if origem_raw else "Inventário Directo"
+    else:
+        setor_destino_id = session.get('setor_id')
+        setor_origem_id = None
+        origem_destino = origem_raw
+        if not origem_destino:
+            flash("Erro: É obrigatório indicar a origem do equipamento.")
+            conn.close()
+            return redirect(url_for('index'))
+    
     codigo_barras = request.form.get('codigo_barras', '').strip()
     documento_pdf = None
     if 'documento' in request.files:
@@ -3310,7 +3386,7 @@ def registrar_entrada():
         flash("Atenção: equipamento sem número de série. Foi registado o nº da guia de entrada como identificador.")
     c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, codigo_barras, documento_pdf, estado_rastreio) 
                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia, "ENTRADA", request.form['equipamento'], request.form['origem'], motivo_entrada, datetime.now().strftime("%Y-%m-%d"), "Em estoque", None, numero_serie, request.form.get('marca',''), entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), request.form.get('quantidade', '1'), None, session.get('setor_id'), codigo_barras, documento_pdf, 'EM_ESTOQUE'))
+              (guia, "ENTRADA", request.form['equipamento'], origem_destino, motivo_entrada, datetime.now().strftime("%Y-%m-%d"), "Em estoque", None, numero_serie, request.form.get('marca',''), entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), request.form.get('quantidade', '1'), setor_origem_id, setor_destino_id, codigo_barras, documento_pdf, 'EM_ESTOQUE'))
     conn.commit()
     conn.close()
     return redirect(url_for('index'))
@@ -3644,7 +3720,7 @@ def alterar_senha():
         return redirect(url_for('cadastros'))
     stored = row[0]
     valid = False
-    if stored and stored.startswith('pbkdf2:'):
+    if stored and ':' in stored and not stored.startswith('md5'):
         valid = check_password_hash(stored, senha_atual)
     elif stored:
         valid = hashlib.md5(senha_atual.encode()).hexdigest() == stored
@@ -3954,11 +4030,14 @@ def ver_guia(guia):
     row = c.fetchone()
     c.execute("SELECT id, nome FROM funcionarios")
     func_map = {str(r[0]): r[1] for r in c.fetchall()}
-    conn.close()
     
     if not row: return "Guia não encontrada", 404
     r = dict(zip(cols, row))
-        
+    
+    c.execute("SELECT id, nome FROM setores")
+    setor_map = {int(s[0]): s[1] for s in c.fetchall()}
+    conn.close()
+    
     buffer = io.BytesIO()
     c_pdf = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
@@ -3985,19 +4064,25 @@ def ver_guia(guia):
     
     if is_entrada:
         origem = r.get('origem_destino', '') or ""
-        destino = "STAE - DDGEI"
+        dest_id = r.get('setor_destino_id')
+        destino = setor_map.get(int(dest_id), "") if dest_id else (r.get('local_destino') or "")
+        if not destino:
+            destino = "Inventário Directo"
         motivo = r.get('motivo', '') or ""
         c_pdf.drawString(50, y-115, "O Equipamento abaixo descrito foi RECEBIDO de (1):")
         c_pdf.drawString(50, y-130, f"{origem}")
         c_pdf.line(50, y-132, 500, y-132)
         
-        c_pdf.drawString(50, y-150, f"Para STAE - DDGEI")
+        c_pdf.drawString(50, y-150, f"Para {destino}")
         c_pdf.line(80, y-152, 500, y-152)
     else:
-        origem = "STAE - DDGEI"
+        orig_id = r.get('setor_origem_id')
+        origem = setor_map.get(int(orig_id), "") if orig_id else (r.get('local_origem') or "")
+        if not origem:
+            origem = "STAE - DDGEI"
         destino = r.get('origem_destino', '') or ""
         motivo = r.get('motivo', '') or ""
-        c_pdf.drawString(50, y-115, "O Equipamento abaixo descrito é RETIRADO de (1) STAE - DDGEI")
+        c_pdf.drawString(50, y-115, f"O Equipamento abaixo descrito é RETIRADO de (1) {origem}")
         
         c_pdf.drawString(50, y-130, f"Para {destino}")
         c_pdf.line(80, y-132, 500, y-132)

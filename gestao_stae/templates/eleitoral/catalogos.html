@@ -47,9 +47,12 @@
     <!-- Coluna 2: Tipos de Material -->
     <div style="flex:2;">
         <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
                 <h3>Tipos de Material</h3>
-                <button class="btn btn-blue" onclick="alert('Funcionalidade de adicionar em desenvolvimento')">+ Novo Tipo</button>
+                <div style="display:flex; gap:0.5rem;">
+                    <button class="btn btn-outline" onclick="document.getElementById('modal-nova-categoria').style.display='block'">+ Nova Categoria</button>
+                    <button class="btn btn-blue" onclick="document.getElementById('modal-novo-tipo').style.display='block'">+ Novo Tipo</button>
+                </div>
             </div>
             <table>
                 <thead>
@@ -78,6 +81,71 @@
                 </tbody>
             </table>
         </div>
+    </div>
+</div>
+
+<!-- Modal Nova Categoria -->
+<div id="modal-nova-categoria" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
+    <div style="background:white; max-width:420px; margin: 100px auto; padding: 2rem; border-radius:8px;">
+        <h3>Nova Categoria de Material</h3>
+        <form method="POST" action="{{ url_for('eleitoral.novo_categoria_material') }}">
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Nome da Categoria (ex: Meios Circulantes, Material de Escritório)</label>
+                <input type="text" name="nome" required placeholder="Ex: Meios Circulantes" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div style="text-align: right; margin-top: 2rem;">
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-nova-categoria').style.display='none'">Cancelar</button>
+                <button type="submit" class="btn btn-blue">Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal Novo Tipo -->
+<div id="modal-novo-tipo" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
+    <div style="background:white; max-width:480px; margin: 100px auto; padding: 2rem; border-radius:8px;">
+        <h3>Novo Tipo de Material</h3>
+        <form method="POST" action="{{ url_for('eleitoral.novo_tipo_material') }}">
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Categoria</label>
+                <select name="categoria_id" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                    <option value="">-- Sem categoria --</option>
+                    {% for cat in categorias %}
+                    <option value="{{ cat.id }}">{{ cat.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Nome do Material *</label>
+                <input type="text" name="nome" required placeholder="Ex: Viatura Ligeira" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label style="display:block; margin-bottom: 0.5rem;">Variante (opcional)</label>
+                <input type="text" name="variante" placeholder="Ex: Pick-up" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div style="display:flex; gap: 1rem; margin-bottom: 1rem;">
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Unidade de Medida</label>
+                    <select name="unidade_medida" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                        <option value="Unidade">Unidade</option>
+                        <option value="Caixa">Caixa</option>
+                        <option value="Kit">Kit</option>
+                        <option value="Metro">Metro</option>
+                    </select>
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block; margin-bottom: 0.5rem;">Rastreia Estado (Bom/Mau)?</label>
+                    <select name="controla_estado" style="width:100%; padding: 0.5rem; border:1px solid #ccc; border-radius:4px;">
+                        <option value="1">Sim</option>
+                        <option value="0">Não</option>
+                    </select>
+                </div>
+            </div>
+            <div style="text-align: right; margin-top: 2rem;">
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-novo-tipo').style.display='none'">Cancelar</button>
+                <button type="submit" class="btn btn-blue">Guardar</button>
+            </div>
+        </form>
     </div>
 </div>
 {% endblock %}

@@ -55,68 +55,70 @@
 </div>
 
 <div class="card" style="margin-top: 1rem; position: relative;">
-    <h3>Distribuição por Província (Mapa Interativo)</h3>
+    <h3>Distribuição por Província (Mapa de Moçambique)</h3>
+    <p style="font-size:0.9rem; color:#64748b; margin-top:-0.5rem;">Passe o rato sobre cada província para ver o material alocado. A cor indica a quantidade relativa.</p>
     
-    <div style="display:flex; flex-direction:column; gap:2rem;">
-        <div id="mozMap" style="display: grid; grid-template-areas: 
-            '. niassa cd .'
-            '. tete nampula .'
-            '. zambezia . .'
-            '. manica sofala .'
-            '. gaza inhambane .'
-            '. maputo maputoc .';
-            gap: 10px; justify-content: center; padding: 2rem; background: #f8fafc; border-radius: 8px;">
-            
-            <div id="prov_Niassa" class="map-prov" style="grid-area: niassa;">Niassa</div>
-            <div id="prov_Cabo Delgado" class="map-prov" style="grid-area: cd;">Cabo Delgado</div>
-            <div id="prov_Nampula" class="map-prov" style="grid-area: nampula;">Nampula</div>
-            <div id="prov_Tete" class="map-prov" style="grid-area: tete;">Tete</div>
-            <div id="prov_Zambezia" class="map-prov" style="grid-area: zambezia;">Zambézia</div>
-            <div id="prov_Manica" class="map-prov" style="grid-area: manica;">Manica</div>
-            <div id="prov_Sofala" class="map-prov" style="grid-area: sofala;">Sofala</div>
-            <div id="prov_Inhambane" class="map-prov" style="grid-area: inhambane;">Inhambane</div>
-            <div id="prov_Gaza" class="map-prov" style="grid-area: gaza;">Gaza</div>
-            <div id="prov_Maputo" class="map-prov" style="grid-area: maputo;">Maputo Prov.</div>
-            <div id="prov_Maputo (Cidade)" class="map-prov" style="grid-area: maputoc;">Maputo Cid.</div>
-        </div>
-        
-        <canvas id="graficoProvincia" style="max-height: 250px;"></canvas>
+    <div style="text-align:center; overflow-x:auto;">
+        <svg id="mozMapSVG" viewBox="0 0 420 620" style="max-width:520px; width:100%; height:auto;">
+            <!-- Niassa -->
+            <path id="prov_Niassa" data-prov="Niassa" d="M80,20 L240,20 L255,120 L150,150 L110,200 L60,180 L40,100 Z" />
+            <!-- Cabo Delgado -->
+            <path id="prov_Cabo Delgado" data-prov="Cabo Delgado" d="M255,120 L395,120 L385,260 L300,250 L255,180 Z" />
+            <!-- Nampula -->
+            <path id="prov_Nampula" data-prov="Nampula" d="M170,270 L255,180 L300,250 L300,360 L230,380 L170,340 Z" />
+            <!-- Tete -->
+            <path id="prov_Tete" data-prov="Tete" d="M40,200 L60,180 L110,200 L150,150 L150,330 L90,380 L20,340 Z" />
+            <!-- Zambezia -->
+            <path id="prov_Zambezia" data-prov="Zambezia" d="M170,340 L230,380 L300,360 L300,470 L210,480 L170,430 Z" />
+            <!-- Manica -->
+            <path id="prov_Manica" data-prov="Manica" d="M150,330 L170,340 L170,430 L210,480 L240,510 L150,500 L90,420 Z" />
+            <!-- Sofala -->
+            <path id="prov_Sofala" data-prov="Sofala" d="M150,500 L240,510 L250,560 L190,580 L120,550 Z" />
+            <!-- Inhambane -->
+            <path id="prov_Inhambane" data-prov="Inhambane" d="M120,600 L205,590 L240,600 L235,520 L165,540 Z" />
+            <!-- Gaza -->
+            <path id="prov_Gaza" data-prov="Gaza" d="M250,600 L330,605 L380,620 L360,540 L280,520 Z" />
+            <!-- Maputo Provincia -->
+            <path id="prov_Maputo" data-prov="Maputo" d="M330,605 L380,620 L405,590 L360,540 Z" />
+            <!-- Cidade de Maputo -->
+            <path id="prov_Cidade de Maputo" data-prov="Cidade de Maputo" d="M230,600 L255,592 L252,585 L240,580 Z" />
+        </svg>
     </div>
+
+    <div style="margin-top:1rem; display:flex; gap:0.5rem; align-items:center; font-size:0.85rem; color:#475569;">
+        <span style="display:inline-block; width:16px; height:16px; background:#fee2e2; border-radius:3px;"></span> Baixo
+        <span style="display:inline-block; width:16px; height:16px; background:#fde68a; border-radius:3px;"></span> Médio
+        <span style="display:inline-block; width:16px; height:16px; background:#86efac; border-radius:3px;"></span> Alto
+        <span style="display:inline-block; width:16px; height:16px; background:#166534; border-radius:3px;"></span> Muito Alto
+    </div>
+
+    <canvas id="graficoProvincia" style="max-height: 250px; margin-top:1.5rem;"></canvas>
     
-    <div id="mapTooltip" style="display:none; position:absolute; background:white; border:1px solid #cbd5e1; box-shadow:0 4px 10px rgba(0,0,0,0.2); padding:1rem; border-radius:8px; z-index:100; min-width: 200px; pointer-events:none;">
+    <div id="mapTooltip" style="display:none; position:absolute; background:white; border:1px solid #cbd5e1; box-shadow:0 4px 10px rgba(0,0,0,0.2); padding:1rem; border-radius:8px; z-index:100; min-width: 220px; pointer-events:none;">
         <h4 id="ttProvName" style="margin-top:0; border-bottom:1px solid #e2e8f0; padding-bottom:0.5rem;">Província</h4>
         <div id="ttContent" style="font-size:0.9rem; margin-top:0.5rem;"></div>
     </div>
 </div>
 
 <style>
-    .map-prov {
-        background: #e2e8f0;
-        border: 2px solid #cbd5e1;
-        border-radius: 8px;
-        padding: 1.5rem;
-        text-align: center;
-        font-weight: bold;
-        color: #475569;
+    #mozMapSVG path {
+        fill: #e2e8f0;
+        stroke: #334155;
+        stroke-width: 1.5;
+        stroke-linejoin: round;
         cursor: pointer;
-        transition: all 0.2s;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        transition: fill 0.15s, filter 0.15s;
     }
-    .map-prov:hover {
-        transform: scale(1.05);
-        background: #bfdbfe;
-        border-color: #3b82f6;
-        color: #1d4ed8;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    #mozMapSVG path:hover {
+        filter: brightness(1.1);
+        stroke-width: 2.5;
+        stroke: #1d4ed8;
     }
-    .map-prov.has-data {
-        background: #c7d2fe;
-        border-color: #6366f1;
-        color: #3730a3;
-    }
-    .map-prov.has-data:hover {
-        background: #a5b4fc;
-    }
+    #mozMapSVG path.nivel-0 { fill: #e2e8f0; }
+    #mozMapSVG path.nivel-1 { fill: #fee2e2; }
+    #mozMapSVG path.nivel-2 { fill: #fde68a; }
+    #mozMapSVG path.nivel-3 { fill: #86efac; }
+    #mozMapSVG path.nivel-4 { fill: #166534; }
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -170,51 +172,70 @@
         }
     });
 
-    // Map Interactive Logic
+    // Map Interactive Logic (SVG)
     fetch('{{ url_for("eleitoral.api_mapa_distribuicao") }}')
     .then(res => res.json())
     .then(data => {
         const tooltip = document.getElementById('mapTooltip');
         const ttProvName = document.getElementById('ttProvName');
         const ttContent = document.getElementById('ttContent');
-        
-        document.querySelectorAll('.map-prov').forEach(el => {
-            const provName = el.id.replace('prov_', '');
-            
-            // Check if province has data
-            if (data[provName] && Object.keys(data[provName]).length > 0) {
-                el.classList.add('has-data');
-                
-                el.addEventListener('mousemove', (e) => {
-                    tooltip.style.display = 'block';
-                    tooltip.style.left = (e.pageX + 15) + 'px';
-                    tooltip.style.top = (e.pageY + 15) + 'px';
-                    
-                    ttProvName.innerText = provName;
-                    
-                    let html = '<table style="width:100%;">';
-                    for (const [mat, qty] of Object.entries(data[provName])) {
-                        html += `<tr><td>${mat}</td><td style="text-align:right; font-weight:bold; padding-left:1rem;">${qty}</td></tr>`;
-                    }
-                    html += '</table>';
-                    ttContent.innerHTML = html;
-                });
-                
-                el.addEventListener('mouseout', () => {
-                    tooltip.style.display = 'none';
-                });
+
+        // Normaliza nomes de província (BD -> mapa)
+        const norm = {
+            'Niassa': 'Niassa',
+            'Cabo Delgado': 'Cabo Delgado',
+            'Nampula': 'Nampula',
+            'Tete': 'Tete',
+            'Zambézia': 'Zambezia', 'Zambezia': 'Zambezia',
+            'Manica': 'Manica',
+            'Sofala': 'Sofala',
+            'Inhambane': 'Inhambane',
+            'Gaza': 'Gaza',
+            'Cidade de Maputo': 'Cidade de Maputo',
+            'Maputo': 'Maputo'
+        };
+
+        // Calcula intervalos para o heatmap
+        const totais = Object.values(data).map(d => Number(d.total) || 0);
+        const maxT = Math.max(...totais, 1);
+        const partes = maxT / 4;
+
+        document.querySelectorAll('#mozMapSVG path[data-prov]').forEach(el => {
+            const provNode = el.getAttribute('data-prov');
+            const provData = data[provNode] || data[norm[provNode]];
+
+            if (provData && (Number(provData.total) || 0) > 0) {
+                const total = Number(provData.total) || 0;
+                let nivel = 1;
+                if (total > partes * 3) nivel = 4;
+                else if (total > partes * 2) nivel = 3;
+                else if (total > partes) nivel = 2;
+                el.classList.add('nivel-' + nivel);
             } else {
-                el.addEventListener('mousemove', (e) => {
-                    tooltip.style.display = 'block';
-                    tooltip.style.left = (e.pageX + 15) + 'px';
-                    tooltip.style.top = (e.pageY + 15) + 'px';
-                    ttProvName.innerText = provName;
-                    ttContent.innerHTML = '<span style="color:#94a3b8;">Sem material alocado</span>';
-                });
-                el.addEventListener('mouseout', () => {
-                    tooltip.style.display = 'none';
-                });
+                el.classList.add('nivel-0');
             }
+
+            el.addEventListener('mousemove', (e) => {
+                tooltip.style.display = 'block';
+                tooltip.style.left = (e.pageX + 15) + 'px';
+                tooltip.style.top = (e.pageY + 15) + 'px';
+                ttProvName.innerText = provNode;
+
+                let html = '<table style="width:100%;">';
+                if (provData && (Number(provData.total) || 0) > 0) {
+                    html += `<tr><td>Total</td><td style="text-align:right; font-weight:bold; padding-left:1rem;">${Number(provData.total)||0}</td></tr>`;
+                    html += `<tr><td>Bom</td><td style="text-align:right; font-weight:bold; padding-left:1rem; color:#16a34a;">${Number(provData.bom)||0}</td></tr>`;
+                    html += `<tr><td>Mau</td><td style="text-align:right; font-weight:bold; padding-left:1rem; color:#dc2626;">${Number(provData.mau)||0}</td></tr>`;
+                } else {
+                    html += '<tr><td style="color:#94a3b8;">Sem material alocado</td></tr>';
+                }
+                html += '</table>';
+                ttContent.innerHTML = html;
+            });
+
+            el.addEventListener('mouseout', () => {
+                tooltip.style.display = 'none';
+            });
         });
     });
 

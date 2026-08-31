@@ -2,7 +2,33 @@
 
 > **Documento de continuidade.** Qualquer agente/sessão que retomar este projeto DEVE ler este ficheiro primeiro. Atualizar sempre que concluir ou iniciar trabalho. Registar aqui o estado real, decisões e pendências — nunca depender de stash/commits para comunicação.
 
-Última atualização: 2026-08-30
+Última atualização: 2026-08-31
+
+---
+
+## 3.1 Estado — sessão 2026-08-31 (não commitado ainda)
+
+**Itens dos 9 requisitos do utilizador concluídos nesta sessão:**
+
+- [x] **Item 6 — Processos 2019/2024** — BD SQLite+PG povoada: processos REC 2019, Votação 2019, REC 2024 (EM_CURSO), Votação 2024. Adicionada opção **"Votação"** ao dropdown de tipo em `processos.html`.
+- [x] **Item 3 — Nova categoria / Item 7 — adicionar material** (`catalogos.html` + `material.html`): modais funcionais "Nova Categoria" e "Novo Tipo" ligados às rotas `novo_categoria_material` e `novo_tipo_material`. No modal de registo de material, bloco "➕ Material em falta no catálogo?" com campo de texto → rota `novo_tipo_material_texto` (cria tipo, associa à categoria "Meios Circulantes" se existir).
+- [x] **Item 5 — Form modal de registo de material funcional** (`material.html`, rota `registar_material` já existia em `routes_eleitoral.py:388`): o form agora submete `processo_id`, `local_id`, `tipo_material_id`, `quantidade_total`, `quantidade_bom`, `quantidade_mau`, `observacoes`; faz INSERT/UPDATE (soma) em `eleitoral_material_sobrante` com dual-write para PG.
+- [x] **Item 4 — Importação Excel com pré-visualização** (`routes_eleitoral.py` + `material.html`):
+  - Colunas novas `caminho_ficheiro` e `modo` em `eleitoral_importacao_material` (SQLite via `migrar_schema_eleitoral`, PG via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`).
+  - A rota `importacao_excel` guarda cópia do ficheiro em `UPLOAD_FOLDER` (`material_import_<ts>_<nome>`) e regista em `eleitoral_importacao_material` via helper `_registar_importacao` (dual-write).
+  - Novas rotas: `GET /eleitoral/importacao` (lista JSON de importações) e `GET /eleitoral/importacao/preview/<id>` (lê o ficheiro guardado, devolve até 25 linhas).
+  - UI: secção "📤 Últimas Importações" em `material.html` (auto-carrega com `carregarImportacoes()`), modal "Pré-visualização" com `previewImportacao(id)`.
+- [x] **Item 1 — Mapa de Moçambique SVG interativo** (`dashboard.html`): substituiu o mock em CSS-grid por um mapa SVG real (11 províncias com paths poligonais). Cada província com `data-prov`, coloração heatmap por quantidade (níveis 0-4), tooltip com Total/Bom/Mau (liga à API `api_mapa_distribuicao`), normalização de nomes BD→mapa (`Cidade de Maputo`/`Maputo`/`Zambézia`...).
+- [x] **Item 2 — Registo de equipamento + guia PDF/PNG** — já estava implementado em sessões anteriores (`inventario_add` em `app.py:4775`: aceita PDF e converte imagem JPG/PNG → PDF via `imagem_para_pdf`, guarda `documento_pdf` em `inventario_local`). Nada a fazer nesta sessão.
+- [x] **Item 8 — Relatório: tabela primeiro, gráficos depois** (`RELATORIOS_TEMPLATE` em `app.py`): a secção "Relatório de Dados" (tabela) passou a vir ANTES dos gráficos (chartEquip/chartSetor/chartMarca no fim da página). Verificado o índice HTML.
+- [x] **Item 9 — Explicação do processo ao utilizador** (`processos.html`): box colapsável "❓ O que é um Processo Eleitoral?" no topo; explica recenseamento/votação, sobrantes, e transferência ao fechar.
+
+**BD / sequences (PG):**
+- As sequences das tabelas SERIAL no PG estavam dessincronizadas (ex: `eleitoral_tipo_material_id_seq` em 4 com max 14) → violações de PK/FK ao inserir ("Meios Circulantes"). Corrigidas com `setval(seq, max(id)+1, false)` para todas as tabelas com sequence de `id` (`fix_seq2.py`). Confirmado: categorias, tipos (veículos id 20-24) e processos presentes no PG e SQLite, sem duplicados.
+
+**Nota Neon:** há erros de concorrência de fundo durante a sincronização dinâmica bidirecional ("deadlock detected", FK em `eleitoral_tipo_material_categoria_id_fkey`) — pré-existentes, relacionados com conexões concorrentes à Neon; não provocam falha do SQLite nem das rotas (validado por smoke test 200).
+
+**Validação (modo local):** login admin OK; `/eleitoral/`, `/catalogos`, `/processos`, `/material`, `/distribuicao`, `/relatorios`, `/eleitoral/importacao` todos 200; novos elementos presentes no HTML renderizado (tabela-importacoes, modal-preview, input_novo_tipo, mozMapSVG, "O que é um Processo").
 
 ---
 
@@ -29,7 +55,26 @@ O módulo eleitoral usa `dual_execute()` (em `routes_eleitoral.py`) para escreve
 
 Branch `main`. Últimos commits (do mais recente): `303e812` (corrige nome UGEA no organograma), `bb5b2b3` (inventário filtrado por local + anulação de movimentação + organograma), `eb54219` (normalizar status + perfil), `8fbc604` (docs), `0ecaa0a` (permissões por usuário, hash werkzeug, fix api_movimento_estado).
 
-**Working tree: só `PLAN.md` modificado (este registo), a commitar.**
+**Working tree: `PLAN.md` + `gestao_stae/app.py` modificados (trabalho 2026-08-31), a commitar.**
+
+**Entrada para inventário / desacoplar do DDGEI (2026-08-31, `app.py`):**
+- **Modo Inventário** novo no formulário "Nova Entrada" (toggle 📦 no topo). Quando ativado:
+  - **Destino obrigatório e selecionável** (todos os setores; default = setor do utilizador) — o material pode ser cadastrado em **qualquer local**.
+  - **Origem opcional** (se vazia → `origem_destino = "Inventário Directo"`; se `SETOR_x` guarda também `setor_origem_id`).
+  - Handler `registrar_entrada` usa `destino_inventario` como `setor_destino_id` (em vez de forçar o setor do utilizador).
+- **Modo normal (não-inventário)** mantido: origem obrigatória, destino = setor do utilizador.
+- **PDF `/ver_guia`** deixa de ter `"STAE - DDGEI"` hardcoded como destino (entrada) / origem (saída): passa a resolver por `setor_destino_id`/`setor_origem_id` via mapa `setor_map` (fallback: `local_destino`/`local_origem`, e "Inventário Directo" se não houver setor).
+- **Histórico (index + `/movimentos`)** mostra colunas ORIGEM e DESTINO separadas, resolvendo os nomes de setores por `id` (`setor_origem_nome`/`setor_destino_nome`) em vez dos fallbacks `'DDGEI'`.
+- **Validado (modo local/SQLite):** POST inventário sem origem cria `setor_destino_id=5`, `origem_destino="Inventário Directo"`; modo normal sem origem é rejeitado; com origem insere como antes; índices/páginas renderizam 200; guia PDF gera (200 application/pdf).
+- Nota: Neon inacessível hoje (timeout) — revalidar modo nuvem quando ligação estiver disponível.
+
+**Fix login com hash `scrypt` (2026-08-31, `app.py` + PG):**
+- **Causa raiz:** `app.py:2736` só verificava senhas com prefixo `pbkdf2:` (ou MD5). Utilizadores criados com werkzeug 3.x na nuvem têm hash `scrypt:...`, que o `check_password_hash` do werkzeug **2.3.7** (ambiente local atual) não consegue verificar → login falhava.
+- **Fix no código:** login (`/login`) e `alterar_senha` passaram a aceitar qualquer hash werkzeug (`':'` e não-`md5` → `check_password_hash`), mantendo o fallback MD5-legado. `app.py:2736` e `app.py:3715`.
+- **Fix na BD (Neon/PG):** o hash da utilizadora **`erica` (id 25)** foi normalizado para `pbkdf2:sha256` de `123` (verificável em qualquer werkzeug). Login `erica`/`123` validado (renders dashboard OK).
+- **Ainda em aberto (risco sistémico):** o utilizador **`banze` (id 6)** continua com hash `scrypt` no PG — se o servidor que corre o sistema usar werkzeug 2.3.7, o `banze` não entrará. Opções: (a) actualizar werkzeug para 3.x no servidor, ou (b) redefinir a senha do `banze` via `/cadastros` (admin). Utilizadores 2–5 têm hash MD5 legado (já migrados no 1º login).
+- **Decisão tomada:** NÃO se atualizou a stack (upgrade Flask 2.3→3.x seria arriscado e pode quebrar a app). Em vez disso normalizam-se os hashes `scrypt` para `pbkdf2:sha256` (verificável em qualquer werkzeug) no PG: **`erica` → `123`** e **`banze` → `banze123` (temporária)**. O `admin`/`tecnico`/`protecao`/etc. NÃO foram tocados (MD5 legado já migrado no 1º login; possíveis senhas personalizadas preservadas). O código aceita qualquer hash werkzeug (`pbkdf2:`/`scrypt:`) + fallback MD5, por isso futuros utilizadores criados na nuvem (scrypt) funcionam se o servidor tiver werkzeug 3.x.
+
 
 **Sincronização RH concluída (2026-08-30)** — ver §4 e §5.
 

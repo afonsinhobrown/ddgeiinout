@@ -6,6 +6,19 @@
     <button onclick="document.getElementById('modal-novo-processo').style.display='block'" class="btn btn-blue">Novo Processo</button>
 </div>
 
+<details style="margin-bottom:1.5rem; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:0.75rem 1rem;">
+    <summary style="cursor:pointer; font-weight:600; color:#1d4ed8; outline:none;">❓ O que é um Processo Eleitoral?</summary>
+    <div style="margin-top:0.75rem; font-size:0.95rem; color:#334155; line-height:1.6;">
+        <p style="margin-top:0;">Um <strong>processo eleitoral</strong> organiza toda a logística de material de uma eleição. Cada processo agrupa o <strong>recenseamento</strong> (registo dos eleitores) e/ou a <strong>votação</strong> (dia das eleições), tendo o seu próprio período de datas.</p>
+        <ul style="margin:0.5rem 0; padding-left:1.2rem;">
+            <li>Só um processo pode estar <strong>Em Curso</strong> de cada vez (é onde se registam novos materiais).</li>
+            <li>Os <strong>sobrantes</strong> (material não distribuído ou sobrante após o envio) são registados dentro do processo.</li>
+            <li>Ao fechar um processo, os sobrantes podem ser <strong>transferidos automaticamente</strong> para o processo seguinte.</li>
+        </ul>
+        <p style="margin-bottom:0;">Use o botão <strong>+ Evento</strong> para marcar os períodos concretos de recenseamento e votação desse processo.</p>
+    </div>
+</details>
+
 <div class="card">
     <table>
         <thead>
@@ -124,6 +137,7 @@
                     <option value="Presidenciais">Presidenciais</option>
                     <option value="Legislativas">Legislativas</option>
                     <option value="Autárquicas">Autárquicas</option>
+                    <option value="Votação">Votação</option>
                     <option value="Recenseamento">Recenseamento</option>
                 </select>
             </div>

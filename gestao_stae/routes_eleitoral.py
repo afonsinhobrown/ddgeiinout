@@ -1,6 +1,8 @@
-from flask import Blueprint, render_template, request, session, redirect, url_for, flash, jsonify
+from flask import Blueprint, render_template, request, session, redirect, url_for, flash, jsonify, send_file
 import sqlite3
 import datetime
+import os
+import uuid as _uuid
 try:
     import psycopg2
     import psycopg2.extras
@@ -382,6 +384,68 @@ def material():
     return render_template('eleitoral/material.html', processos=processos, locais=locais, 
                            processo_id=processo_id, local_id=local_id, tipo_material_id=tipo_material_id,
                            materiais=materiais, tipos_material=tipos_material)
+@eleitoral_bp.route('/material/registar', methods=['POST'])
+def registar_material():
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor()
+    param_marker = "%s" if is_pg else "?"
+    try:
+        processo_id = request.form.get('processo_id')
+        local_id = request.form.get('local_id')
+        tipo_material_id = request.form.get('tipo_material_id')
+        qtd_total = float(request.form.get('quantidade_total', 0) or 0)
+        qtd_bom = float(request.form.get('quantidade_bom', 0) or 0)
+        qtd_mau = float(request.form.get('quantidade_mau', 0) or 0)
+        observacoes = request.form.get('observacoes', '')
+        utilizador_id = session.get('user_id', 1)
+
+        if not processo_id or not local_id or not tipo_material_id:
+            flash("Erro: preencha processo, local e material.", "error")
+            return redirect(url_for('eleitoral.material'))
+
+        # Verifica se já existe registo para processo+local+tipo — se sim, soma
+        c.execute(f"SELECT id FROM eleitoral_material_sobrante WHERE processo_id = {param_marker} AND local_id = {param_marker} AND tipo_material_id = {param_marker}",
+                  (processo_id, local_id, tipo_material_id))
+        existing = c.fetchone()
+        if existing:
+            c.execute(f"UPDATE eleitoral_material_sobrante SET quantidade_total = quantidade_total + {param_marker}, quantidade_bom = quantidade_bom + {param_marker}, quantidade_mau = quantidade_mau + {param_marker}, actualizado_em = CURRENT_TIMESTAMP WHERE id = {param_marker}",
+                      (qtd_total, qtd_bom, qtd_mau, existing[0]))
+        else:
+            c.execute(f"INSERT INTO eleitoral_material_sobrante (processo_id, local_id, tipo_material_id, quantidade_total, quantidade_bom, quantidade_mau, origem, observacoes, utilizador_id) VALUES ({param_marker}, {param_marker}, {param_marker}, {param_marker}, {param_marker}, {param_marker}, 'REGISTO_DIRECTO', {param_marker}, {param_marker})",
+                      (processo_id, local_id, tipo_material_id, qtd_total, qtd_bom, qtd_mau, observacoes, utilizador_id))
+        conn.commit()
+
+        # DUAL-WRITE para PG quando em modo local
+        if not is_pg:
+            pg = get_pg_for_dual_write()
+            if pg:
+                try:
+                    pg_c = pg.cursor()
+                    pg_c.execute("SELECT id FROM eleitoral_material_sobrante WHERE processo_id=%s AND local_id=%s AND tipo_material_id=%s",
+                                 (processo_id, local_id, tipo_material_id))
+                    pexist = pg_c.fetchone()
+                    if pexist:
+                        pg_c.execute("UPDATE eleitoral_material_sobrante SET quantidade_total=quantidade_total+%s, quantidade_bom=quantidade_bom+%s, quantidade_mau=quantidade_mau+%s WHERE id=%s",
+                                     (qtd_total, qtd_bom, qtd_mau, pexist[0]))
+                    else:
+                        pg_c.execute("INSERT INTO eleitoral_material_sobrante (processo_id, local_id, tipo_material_id, quantidade_total, quantidade_bom, quantidade_mau, origem, observacoes, utilizador_id) VALUES (%s,%s,%s,%s,%s,%s,'REGISTO_DIRECTO',%s,%s)",
+                                     (processo_id, local_id, tipo_material_id, qtd_total, qtd_bom, qtd_mau, observacoes, utilizador_id))
+                    pg.commit()
+                except Exception as e:
+                    print(f"[dual-write registar] {e}")
+                    try: pg.rollback()
+                    except Exception: pass
+                finally:
+                    pg.close()
+
+        flash("Material registado com sucesso!", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Erro ao registar material: {str(e)}", "error")
+    finally:
+        conn.close()
+    return redirect(url_for('eleitoral.material', processo_id=processo_id))
+
 @eleitoral_bp.route('/material/editar/<int:id>', methods=['POST'])
 def editar_material(id):
     from flask import session
@@ -480,6 +544,71 @@ def apagar_material(id):
         conn.close()
     return redirect(request.referrer or url_for('eleitoral.material'))
 
+def _registar_importacao(processo_id, caminho, nome_ficheiro, modo, utilizador_id, total_sucesso):
+    """Regista uma importação em eleitoral_importacao_material (SQLite + PG via dual)."""
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor()
+    marker = "%s" if is_pg else "?"
+    try:
+        c.execute(f"INSERT INTO eleitoral_importacao_material (processo_id, nome_ficheiro, caminho_ficheiro, modo, utilizador_id, total_sucesso, estado) VALUES ({marker},{marker},{marker},{marker},{marker},{marker},'CONCLUIDO')",
+                  (processo_id, nome_ficheiro, caminho, modo, utilizador_id, total_sucesso))
+        conn.commit()
+        importacao_id = c.lastrowid if not is_pg else None
+        if not is_pg:
+            pg = get_pg_for_dual_write()
+            if pg:
+                try:
+                    pg.cursor().execute("INSERT INTO eleitoral_importacao_material (processo_id, nome_ficheiro, caminho_ficheiro, modo, utilizador_id, total_sucesso, estado) VALUES (%s,%s,%s,%s,%s,%s,'CONCLUIDO')",
+                                        (processo_id, nome_ficheiro, caminho, modo, utilizador_id, total_sucesso))
+                    pg.commit()
+                except Exception as e:
+                    print(f"[dual-write importacao-reg] {e}")
+                finally:
+                    pg.close()
+        return importacao_id
+    finally:
+        conn.close()
+
+
+@eleitoral_bp.route('/importacao')
+def lista_importacoes():
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor()
+    marker = "%s" if is_pg else "?"
+    try:
+        c.execute(f"SELECT i.id, i.nome_ficheiro, i.caminho_ficheiro, i.data_importacao, i.modo, i.total_sucesso, p.nome AS processo FROM eleitoral_importacao_material i LEFT JOIN eleitoral_processo_eleitoral p ON p.id = i.processo_id ORDER BY i.id DESC")
+        rows = c.fetchall()
+    finally:
+        conn.close()
+    return jsonify([dict(r) if hasattr(r, 'keys') else {
+        'id': r[0], 'nome_ficheiro': r[1], 'caminho_ficheiro': r[2],
+        'data_importacao': r[3], 'modo': r[4], 'total_sucesso': r[5], 'processo': r[6]
+    } for r in rows])
+
+
+@eleitoral_bp.route('/importacao/preview/<int:id>')
+def preview_importacao(id):
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor()
+    marker = "%s" if is_pg else "?"
+    c.execute(f"SELECT caminho_ficheiro FROM eleitoral_importacao_material WHERE id = {marker}", (id,))
+    r = c.fetchone()
+    conn.close()
+    caminho = r[0] if r else None
+    if not caminho or not os.path.exists(caminho):
+        return jsonify({'linhas': [], 'erro': 'Ficheiro original não disponível.'})
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(caminho)
+        sheet = wb.active
+        dados = []
+        for row in sheet.iter_rows(min_row=1, max_row=25, values_only=True):
+            dados.append([('' if v is None else str(v)) for v in row])
+        return jsonify({'linhas': dados})
+    except Exception as e:
+        return jsonify({'linhas': [], 'erro': f'Erro ao ler ficheiro: {str(e)}'})
+
+
 @eleitoral_bp.route('/importacao', methods=['POST'])
 def importacao_excel():
     if 'file' not in request.files:
@@ -496,8 +625,27 @@ def importacao_excel():
     limpar = request.form.get('limpar_provincia') == 'sim'
     
     if file and file.filename.endswith('.xlsx'):
+        saved_caminho = None
+        importacao_id = None
         try:
             import openpyxl
+
+            # Guarda uma cópia do ficheiro para pré-visualização (pós-importação)
+            from app import UPLOAD_FOLDER
+            if UPLOAD_FOLDER:
+                try:
+                    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+                    st = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                    fname = f"material_import_{st}_{os.path.basename(file.filename)}"
+                    saved_caminho = os.path.join(UPLOAD_FOLDER, fname)
+                    file.stream.seek(0)
+                    with open(saved_caminho, 'wb') as fh:
+                        fh.write(file.read())
+                    file.stream.seek(0)
+                except Exception as e:
+                    print(f"[import] erro ao guardar ficheiro: {e}")
+                    saved_caminho = None
+
             wb = openpyxl.load_workbook(file)
             sheet = wb.active
             
@@ -611,6 +759,14 @@ def importacao_excel():
                         pg.close()
             
             conn.close()
+            # Regista a importação (parcialmente para pré-visualização/fins de auditoria)
+            try:
+                importacao_id = _registar_importacao(
+                    processo_id, saved_caminho, file.filename,
+                    modo, utilizador_id, registos_adicionados
+                )
+            except Exception as e:
+                print(f"[import] erro ao registar importacao: {e}")
             flash(f"Importação concluída! {registos_adicionados} registos processados.", "success")
         except Exception as e:
             flash(f"Erro ao processar ficheiro Excel: {str(e)}", "error")
@@ -625,12 +781,137 @@ def catalogos():
     c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
     c.execute("SELECT * FROM eleitoral_tipo_material")
     tipos = c.fetchall()
+    c.execute("SELECT * FROM eleitoral_categoria_material")
+    categorias = c.fetchall()
     c.execute("SELECT * FROM eleitoral_provincia")
     provincias = c.fetchall()
     c.execute("SELECT * FROM eleitoral_pais_diaspora")
     paises = c.fetchall()
     conn.close()
-    return render_template('eleitoral/catalogos.html', tipos=tipos, provincias=provincias, paises=paises)
+    return render_template('eleitoral/catalogos.html', tipos=tipos, categorias=categorias, provincias=provincias, paises=paises)
+
+@eleitoral_bp.route('/categoria_material/novo', methods=['POST'])
+def novo_categoria_material():
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor()
+    param_marker = "%s" if is_pg else "?"
+    try:
+        nome = request.form.get('nome', '').strip()
+        if not nome:
+            flash("Erro: o nome da categoria é obrigatório.", "error")
+            return redirect(url_for('eleitoral.catalogos'))
+        # evita duplicados
+        c.execute(f"SELECT id FROM eleitoral_categoria_material WHERE nome = {param_marker}", (nome,))
+        if c.fetchone():
+            flash("A categoria já existe.", "warning")
+            return redirect(url_for('eleitoral.catalogos'))
+        c.execute(f"INSERT INTO eleitoral_categoria_material (nome) VALUES ({param_marker})", (nome,))
+        conn.commit()
+        if not is_pg:
+            pg = get_pg_for_dual_write()
+            if pg:
+                try:
+                    pg.cursor().execute("INSERT INTO eleitoral_categoria_material (nome) VALUES (%s) ON CONFLICT (nome) DO NOTHING", (nome,))
+                    pg.commit()
+                except Exception as e:
+                    print(f"[dual-write cat] {e}")
+                finally:
+                    pg.close()
+        flash(f"Categoria '{nome}' criada com sucesso!", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Erro: {str(e)}", "error")
+    finally:
+        conn.close()
+    return redirect(url_for('eleitoral.catalogos'))
+
+@eleitoral_bp.route('/tipo_material/novo', methods=['POST'])
+def novo_tipo_material():
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor()
+    param_marker = "%s" if is_pg else "?"
+    try:
+        categoria_id = request.form.get('categoria_id') or None
+        nome = request.form.get('nome', '').strip()
+        variante = request.form.get('variante', '').strip()
+        unidade_medida = request.form.get('unidade_medida', 'Unidade').strip()
+        controla_estado = 1 if request.form.get('controla_estado') in ('1', 'on', 'sim') else 0
+        if not nome:
+            flash("Erro: o nome do material é obrigatório.", "error")
+            return redirect(url_for('eleitoral.catalogos'))
+        if is_pg:
+            c.execute("INSERT INTO eleitoral_tipo_material (categoria_id, nome, variante, unidade_medida, controla_estado) VALUES (%s,%s,%s,%s,%s)",
+                      (categoria_id, nome, variante or None, unidade_medida, controla_estado))
+        else:
+            c.execute("INSERT INTO eleitoral_tipo_material (categoria_id, nome, variante, unidade_medida, controla_estado) VALUES (?,?,?,?,?)",
+                      (categoria_id, nome, variante or None, unidade_medida, controla_estado))
+        conn.commit()
+        if not is_pg:
+            pg = get_pg_for_dual_write()
+            if pg:
+                try:
+                    pg.cursor().execute("INSERT INTO eleitoral_tipo_material (categoria_id, nome, variante, unidade_medida, controla_estado) VALUES (%s,%s,%s,%s,%s)",
+                                        (categoria_id, nome, variante or None, unidade_medida, controla_estado))
+                    pg.commit()
+                except Exception as e:
+                    print(f"[dual-write tipo] {e}")
+                finally:
+                    pg.close()
+        flash(f"Material '{nome}' adicionado com sucesso!", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Erro: {str(e)}", "error")
+    finally:
+        conn.close()
+    return redirect(url_for('eleitoral.catalogos'))
+
+@eleitoral_bp.route('/tipo_material/nome', methods=['POST'])
+def novo_tipo_material_texto():
+    """Adiciona rapidamente um tipo de material apenas pelo nome (texto livre)."""
+    nome = request.form.get('nome', '').strip()
+    if not nome:
+        flash("Erro: escreva o nome do material.", "error")
+        return redirect(request.referrer or url_for('eleitoral.material'))
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor()
+    param_marker = "%s" if is_pg else "?"
+    try:
+        # Encontra/usa a categoria "Meios Circulantes" se houver, senão coloca sem categoria
+        c.execute(f"SELECT id FROM eleitoral_categoria_material WHERE nome = {param_marker}", ("Meios Circulantes",))
+        cat = c.fetchone()
+        categoria_id = cat[0] if cat else None
+        c.execute(f"SELECT id FROM eleitoral_tipo_material WHERE nome = {param_marker}", (nome,))
+        if c.fetchone():
+            flash("Este material já existe no catálogo.", "warning")
+            return redirect(request.referrer or url_for('eleitoral.material'))
+        if is_pg:
+            c.execute("INSERT INTO eleitoral_tipo_material (categoria_id, nome, variante, unidade_medida, controla_estado) VALUES (%s,%s,NULL,'Unidade',1)",
+                      (categoria_id, nome))
+        else:
+            c.execute("INSERT INTO eleitoral_tipo_material (categoria_id, nome, variante, unidade_medida, controla_estado) VALUES (?,?,NULL,'Unidade',1)",
+                      (categoria_id, nome))
+        conn.commit()
+        tipo_id = c.lastrowid if not is_pg else None
+        if not is_pg:
+            pg = get_pg_for_dual_write()
+            if pg:
+                try:
+                    pg.cursor().execute("INSERT INTO eleitoral_tipo_material (categoria_id, nome, variante, unidade_medida, controla_estado) VALUES (%s,%s,NULL,'Unidade',1)",
+                                        (categoria_id, nome))
+                    pg.commit()
+                except Exception as e:
+                    print(f"[dual-write tipo texto] {e}")
+                finally:
+                    pg.close()
+        flash(f"Material '{nome}' adicionado ao catálogo!", "success")
+        return redirect(url_for('eleitoral.material', tipo_material_id=tipo_id) if tipo_id else url_for('eleitoral.material'))
+    except Exception as e:
+        conn.rollback()
+        flash(f"Erro: {str(e)}", "error")
+    finally:
+        conn.close()
+    return redirect(request.referrer or url_for('eleitoral.material'))
+
 
 @eleitoral_bp.route('/eventos', methods=['POST'])
 def add_evento():
