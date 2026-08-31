@@ -6,6 +6,30 @@
 
 ---
 
+## 3.1 Estado — sessão 2026-08-31 (última; commitado/push)
+
+**Fix: botão "Iniciar Processo" quebrava na nuvem (`166847f`):** `iniciar_processo` (`routes_eleitoral.py`) usava marcador `?` (SQLite) mas em modo nuvem a conexão é PostgreSQL que exige `%s`. Corrigido com `{'%s' if is_pg else '?'}`. Verificado em cloud (id 10 PLANEADO→EM_CURSO). Escaneou-se os restantes `?` no módulo eleitoral — todos os outros estão protegidos por `if is_pg`/`else`.
+
+**Fix: mapa de Moçambique "sumia" em produção (`0c3ec51`):** o `vercel.json` tinha rota catch-all `/(.*)` que redirecionava também `/static/*` para a app Flask, nunca servindo o SVG. Adicionada rota `{src:"/static/(.*)", dest:"/gestao_stae/static/$1"}` antes do catch-all. Local continuava a funcionar.
+
+**Fix: modal do mapa eleitoral mostrava sempre zero (`293830f`):** causa dupla:
+1. `api_mapa_distribuicao` e `api_mapa_provincia` agregavam por `LEFT JOIN eleitoral_provincia ON p.id=l.provincia_id`, mas os locais **não têm `provincia_id` preenchido** (é NULL) — o nome da província está em `l.nome`. Passaram a agregar por **`l.nome`** filtrando `l.tipo='PROVINCIA'` (exclui Central e países de diáspora), como o relatório já fazia.
+2. Nenhum endpoint respeitava o `processo_id` selecionado no dashboard (usavam sempre o processo ativo EM_CURSO). Agora ambos aceitam `?processo_id=...` (fallback ao ativo) e o dashboard passa o `processo_id` selecionado. No clique da província, o JS passa o **nome BD** (via mapa inverso) ao endpoint, não a chave SVG normalizada.
+- Verificado em cloud: `?processo_id=1` devolve 11 províncias (Cabo Delgado 821.8, Cidade de Maputo 1670.9, Gaza 3834.56...); detalhe por província não-zero com itens. Local idem.
+- **Nota:** dados preexistentes têm inconsistência `bom`+`mau` ≠ `total` em alguns registos (não introduzido por esta mudança).
+
+**Feat: guias permitem escolher o departamento responsável + `ver_guia` dinâmico (`24894d0`):** o PDF da guia tinha cabeçalho e assinatura hardcoded ("DEPARTAMENTO DE DELIMITAÇÃO GEOGRÁFICA" / "O Chefe de Departamento de Informática") para todas as guias, ignorando o departamento real. Agora:
+- Nova coluna `departamento_responsavel_id` em `movimentos` (migração SQLite em `check_db_integrity` e PG em `init_pg_db`).
+- Seletor "Departamento Responsável (aparece na guia)" nos 4 formulários: entrada, saída, modal de saída/reparação e modal de saída de inventário (default = setor do utilizador).
+- Rotas `registrar_entrada`, `registrar_saida`, `registrar_saida_reparacao`, `registrar_saida_inventario` gravam o campo escolhido (fallback ao setor da sessão).
+- `ver_guia`: cabeçalho e "O Chefe de {departamento}" agora dinâmicos. Como os **ids de setor divergem entre local e nuvem**, a resolução usa **normalização por texto** do nome do setor (`nome_canonico_setor`): DDGEI, Património e Aprovisionamento, RH, Finanças, Aquisições, Transportes, Protecção, Recenseamento, DOOE, UGEA, Gabinete, Secretaria. Fallback → DDGEI canónico.
+- Nomenclatura: `organograma_canonico.json` DDGEI corrigido para "Departamento de Delimitação **Geográfica**, Estatística e Informática".
+- Verificado em local e cloud: PDF gera 200; cabeçalho/assinatura refletem o departamento escolhido (ex: Protecção).
+
+**Nota Neon:** erros de concorrência de fundo na sincronização bidirecional ("database is locked", "deadlock detected", FK `eleitoral_tipo_material_categoria_id_fkey`) são pré-existentes e não afetam SQLite nem as rotas (validadas 200 em local+cloud).
+
+---
+
 ## 3.1 Estado — sessão 2026-08-31 (commitado/push)
 
 **Novas funcionalidades — mapa em texto + relatórios PDF com vários critérios (`8fdd141`):**
