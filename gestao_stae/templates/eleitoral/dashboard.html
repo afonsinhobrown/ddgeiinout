@@ -196,7 +196,7 @@
             const norm = {
                 'Cidade de Maputo': 'Maputo City',
                 'Maputo': 'Maputo',
-                'Zambézia': 'Zambezia', 'Zambezia': 'Zambezia',
+                'Zambézia': 'Zambezia',
                 'Cabo Delgado': 'Cabo Delgado',
                 'Niassa': 'Niassa',
                 'Nampula': 'Nampula',
@@ -218,8 +218,10 @@
             document.querySelectorAll('#mozMapSVG path.prov[data-prov]').forEach(el => {
                 const provNode = el.getAttribute('data-prov');
                 const chave = norm[provNode] || provNode;
-                const provData = data[chave] !== undefined ? data[chave]
-                    : (data[provNode] !== undefined ? data[provNode] : null);
+                const chaveBD = normInv[provNode] || chave;
+                const provData = data[chaveBD] !== undefined ? data[chaveBD]
+                    : (data[chave] !== undefined ? data[chave]
+                        : (data[provNode] !== undefined ? data[provNode] : null));
 
                 if (provData && (Number(provData.total) || 0) > 0) {
                     const total = Number(provData.total) || 0;

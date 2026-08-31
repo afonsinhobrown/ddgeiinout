@@ -1530,20 +1530,20 @@ def api_mapa_distribuicao():
     c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
     
     processo_id = request.args.get('processo_id')
+    # Sem processo selecionado => agrega TODOS os processos (consistente com os gráficos)
+    filtro_proc = ""
+    param = ()
     if processo_id:
-        processo_id = int(processo_id)
-    else:
-        # Processo Ativo
-        c.execute("SELECT id FROM eleitoral_processo_eleitoral WHERE estado = 'EM_CURSO' ORDER BY id DESC LIMIT 1")
-        processo_ativo = c.fetchone()
-        if not processo_ativo:
-            conn.close()
-            return jsonify({})
-        processo_id = processo_ativo['id'] if is_pg else processo_ativo['id']
-    
+        try:
+            processo_id = int(processo_id)
+        except (TypeError, ValueError):
+            processo_id = None
+        if processo_id:
+            filtro_proc = "s.processo_id = %s AND " if is_pg else "s.processo_id = ? AND "
+            param = (processo_id,)
+
     # Map by provincia: agrega pelo nome do LOCAL (que é o nome da província),
     # excluindo Centrais e Países de Diáspora (não são províncias do mapa)
-    param = (processo_id,)
     query = '''
         SELECT 
             l.nome as provincia, 
@@ -1552,9 +1552,9 @@ def api_mapa_distribuicao():
             SUM(s.quantidade_mau) as mau
         FROM eleitoral_material_sobrante s
         JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
-        WHERE s.processo_id = %s AND l.tipo = 'PROVINCIA'
+        WHERE {filtro}l.tipo = 'PROVINCIA'
         GROUP BY l.nome
-    ''' if is_pg else '''
+    '''.format(filtro=filtro_proc) if is_pg else '''
         SELECT 
             l.nome as provincia, 
             SUM(s.quantidade_total) as total,
@@ -1562,9 +1562,9 @@ def api_mapa_distribuicao():
             SUM(s.quantidade_mau) as mau
         FROM eleitoral_material_sobrante s
         JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
-        WHERE s.processo_id = ? AND l.tipo = 'PROVINCIA'
+        WHERE {filtro}l.tipo = 'PROVINCIA'
         GROUP BY l.nome
-    '''
+    '''.format(filtro=filtro_proc)
     c.execute(query, param)
     dados = c.fetchall()
     
@@ -1600,13 +1600,12 @@ def api_mapa_provincia():
             processo_id = int(processo_id)
         except (TypeError, ValueError):
             processo_id = None
-    if not processo_id:
-        c.execute("SELECT id FROM eleitoral_processo_eleitoral WHERE estado = 'EM_CURSO' ORDER BY id DESC LIMIT 1")
-        proc = c.fetchone()
-        if not proc:
-            conn.close()
-            return jsonify({'provincia': provincia, 'total': 0, 'bom': 0, 'mau': 0, 'locais': [], 'itens': []})
-        processo_id = proc['id'] if is_pg else proc['id']
+    # Sem processo selecionado => agrega TODOS os processos (consistente com os gráficos)
+    filtro_proc = ""
+    params = (provincia,)
+    if processo_id:
+        filtro_proc = f"s.processo_id = {pm} AND "
+        params = (processo_id, provincia)
 
     query = f'''
         SELECT l.nome as provincia,
@@ -1615,10 +1614,10 @@ def api_mapa_provincia():
                SUM(s.quantidade_mau) as mau
         FROM eleitoral_material_sobrante s
         JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
-        WHERE s.processo_id = {pm} AND l.tipo = 'PROVINCIA' AND l.nome = {pm}
+        WHERE {filtro_proc}l.tipo = 'PROVINCIA' AND l.nome = {pm}
         GROUP BY l.nome
     '''
-    c.execute(query, (processo_id, provincia))
+    c.execute(query, params)
     resumo = c.fetchone()
 
     itens_query = f'''
@@ -1631,11 +1630,11 @@ def api_mapa_provincia():
         JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
         JOIN eleitoral_tipo_material t ON s.tipo_material_id = t.id
         LEFT JOIN eleitoral_categoria_material c ON t.categoria_id = c.id
-        WHERE s.processo_id = {pm} AND l.tipo = 'PROVINCIA' AND l.nome = {pm}
+        WHERE {filtro_proc}l.tipo = 'PROVINCIA' AND l.nome = {pm}
         GROUP BY t.nome, t.variante, c.nome, l.nome
         ORDER BY total DESC
     '''
-    c.execute(itens_query, (processo_id, provincia))
+    c.execute(itens_query, params)
     itens = c.fetchall()
 
     conn.close()
