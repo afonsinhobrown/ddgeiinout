@@ -6,7 +6,7 @@
 
 ---
 
-## 3.1 Estado — sessão 2026-08-31 (não commitado ainda)
+## 3.1 Estado — sessão 2026-08-31 (commitado/push)
 
 **Itens dos 9 requisitos do utilizador concluídos nesta sessão:**
 
@@ -18,7 +18,7 @@
   - A rota `importacao_excel` guarda cópia do ficheiro em `UPLOAD_FOLDER` (`material_import_<ts>_<nome>`) e regista em `eleitoral_importacao_material` via helper `_registar_importacao` (dual-write).
   - Novas rotas: `GET /eleitoral/importacao` (lista JSON de importações) e `GET /eleitoral/importacao/preview/<id>` (lê o ficheiro guardado, devolve até 25 linhas).
   - UI: secção "📤 Últimas Importações" em `material.html` (auto-carrega com `carregarImportacoes()`), modal "Pré-visualização" com `previewImportacao(id)`.
-- [x] **Item 1 — Mapa de Moçambique SVG interativo** (`dashboard.html`): substituiu o mock em CSS-grid por um mapa SVG real (11 províncias com paths poligonais). Cada província com `data-prov`, coloração heatmap por quantidade (níveis 0-4), tooltip com Total/Bom/Mau (liga à API `api_mapa_distribuicao`), normalização de nomes BD→mapa (`Cidade de Maputo`/`Maputo`/`Zambézia`...).
+- [x] **Item 1 — Mapa de Moçambique SVG interativo** (`dashboard.html` + `static/mozambique.svg`): após utilizador reclamar que o mapa "nem parece de Moçambique", substituiu os polígonos desenhados à mão por um **mapa real de Moçambique** (SimpleMaps, CC BY, `static/mozambique.svg`, viewBox 0 0 1000 1000, 11 províncias como camadas `<path class="prov" data-prov="...">` separadas). O dashboard carrega o SVG por `fetch()` e injeta em `#mozMapSVG`, aplica coloração heatmap por quantidade (níveis 0-4 via CSS), tooltip com Total/Bom/Mau (liga à API `api_mapa_distribuicao`), e normalização de nomes BD→mapa (`Cidade de Maputo`→`Maputo City`, `Zambézia`→`Zambezia`). Atribuição SimpleMaps na legenda.
 - [x] **Item 2 — Registo de equipamento + guia PDF/PNG** — já estava implementado em sessões anteriores (`inventario_add` em `app.py:4775`: aceita PDF e converte imagem JPG/PNG → PDF via `imagem_para_pdf`, guarda `documento_pdf` em `inventario_local`). Nada a fazer nesta sessão.
 - [x] **Item 8 — Relatório: tabela primeiro, gráficos depois** (`RELATORIOS_TEMPLATE` em `app.py`): a secção "Relatório de Dados" (tabela) passou a vir ANTES dos gráficos (chartEquip/chartSetor/chartMarca no fim da página). Verificado o índice HTML.
 - [x] **Item 9 — Explicação do processo ao utilizador** (`processos.html`): box colapsável "❓ O que é um Processo Eleitoral?" no topo; explica recenseamento/votação, sobrantes, e transferência ao fechar.
