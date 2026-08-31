@@ -8,6 +8,11 @@
 
 ## 3.1 Estado — sessão 2026-08-31 (commitado/push)
 
+**Fix produção — `/relatorios` 500 em Vercel (Neon):** a página dava `Internal Server Error`. Causa: agregação `CAST(quantidade AS INTEGER)` falhava no PostgreSQL porque a tabela PG `movimentos` tinha **3 linhas com `quantidade = 'None'`** (string literal, não NULL) — SQLite tolera o cast mas PG lança `invalid input syntax for type integer: "None"`. Corrigido em `7e584df`:
+- **Dados:** limpas as 3 linhas em Neon (`quantidade='None'` → `NULL`).
+- **Causa raiz:** rota de saída de stock (`app.py:3486`) inseria o valor bruto do form em `quantidade`, que podia ser a string `'None'`; agora normaliza para inteiro seguro antes do INSERT (fallback `'1'`).
+- Verificado: todas as tabs de `/relatorios` (inventario/entradas_saidas/movimentos/saidas/transferencias) retornam 200 em **modo nuvem (PG)** e **modo local (SQLite)**.
+
 **Itens dos 9 requisitos do utilizador concluídos nesta sessão:**
 
 - [x] **Item 6 — Processos 2019/2024** — BD SQLite+PG povoada: processos REC 2019, Votação 2019, REC 2024 (EM_CURSO), Votação 2024. Adicionada opção **"Votação"** ao dropdown de tipo em `processos.html`.
