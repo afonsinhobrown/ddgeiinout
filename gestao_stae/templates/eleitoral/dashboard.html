@@ -177,7 +177,8 @@
     });
 
     // Map Interactive Logic (SVG)
-    fetch('{{ url_for("eleitoral.api_mapa_distribuicao") }}')
+    const procQuery = '{{ processo_id or "" }}';
+    fetch('{{ url_for("eleitoral.api_mapa_distribuicao") }}' + (procQuery ? '?processo_id=' + encodeURIComponent(procQuery) : ''))
     .then(res => res.json())
     .then(data => {
         // Primeiro carrega o SVG real do mapa
@@ -205,6 +206,9 @@
                 'Inhambane': 'Inhambane',
                 'Gaza': 'Gaza'
             };
+            // Mapa inverso: nome SVG -> nome na BD (o endpoint iguala por l.nome)
+            const normInv = {};
+            Object.keys(norm).forEach(k => { normInv[norm[k]] = k; });
 
             // Calcula intervalos para o heatmap
             const totais = Object.values(data).map(d => Number(d.total) || 0);
@@ -251,7 +255,7 @@
                 });
 
                 el.addEventListener('click', () => {
-                    abrirProvModal(chave);
+                    abrirProvModal(chave, normInv[provNode] || chave);
                 });
             });
         })
@@ -260,8 +264,9 @@
         });
     });
 
-    function abrirProvModal(provincia) {
+    function abrirProvModal(provincia, provinciaBD) {
         const modal = document.getElementById('provModal');
+        const nomeQuery = provinciaBD || provincia;
         modal.style.display = 'flex';
         document.getElementById('provModalTitle').innerText = provincia;
         document.getElementById('provModalTotal').innerText = '...';
@@ -269,7 +274,7 @@
         document.getElementById('provModalMau').innerText = '...';
         document.getElementById('provModalDetail').innerHTML = '<p style="color:#64748b;">A carregar detalhe...</p>';
 
-        fetch(`{{ url_for("eleitoral.api_mapa_provincia") }}?provincia=${encodeURIComponent(provincia)}`)
+        fetch(`{{ url_for("eleitoral.api_mapa_provincia") }}?provincia=${encodeURIComponent(nomeQuery)}` + (procQuery ? '&processo_id=' + encodeURIComponent(procQuery) : ''))
         .then(res => res.json())
         .then(d => {
             document.getElementById('provModalTotal').innerText = Number(d.total) || 0;

@@ -1529,40 +1529,41 @@ def api_mapa_distribuicao():
     conn, is_pg = get_eleitoral_db()
     c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
     
-    # Processo Ativo
-    c.execute("SELECT id FROM eleitoral_processo_eleitoral WHERE estado = 'EM_CURSO' ORDER BY id DESC LIMIT 1")
-    processo_ativo = c.fetchone()
+    processo_id = request.args.get('processo_id')
+    if processo_id:
+        processo_id = int(processo_id)
+    else:
+        # Processo Ativo
+        c.execute("SELECT id FROM eleitoral_processo_eleitoral WHERE estado = 'EM_CURSO' ORDER BY id DESC LIMIT 1")
+        processo_ativo = c.fetchone()
+        if not processo_ativo:
+            conn.close()
+            return jsonify({})
+        processo_id = processo_ativo['id'] if is_pg else processo_ativo['id']
     
-    if not processo_ativo:
-        conn.close()
-        return jsonify({})
-        
-    processo_id = processo_ativo['id'] if is_pg else processo_ativo['id']
-    
-    # Map by provincia (join com eleitoral_provincia para suportar a hierarquia de locais)
+    # Map by provincia: agrega pelo nome do LOCAL (que é o nome da província),
+    # excluindo Centrais e Países de Diáspora (não são províncias do mapa)
     param = (processo_id,)
     query = '''
         SELECT 
-            p.nome as provincia, 
+            l.nome as provincia, 
             SUM(s.quantidade_total) as total,
             SUM(s.quantidade_bom) as bom,
             SUM(s.quantidade_mau) as mau
         FROM eleitoral_material_sobrante s
         JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
-        LEFT JOIN eleitoral_provincia p ON p.id = l.provincia_id
-        WHERE s.processo_id = %s
-        GROUP BY p.nome
+        WHERE s.processo_id = %s AND l.tipo = 'PROVINCIA'
+        GROUP BY l.nome
     ''' if is_pg else '''
         SELECT 
-            p.nome as provincia, 
+            l.nome as provincia, 
             SUM(s.quantidade_total) as total,
             SUM(s.quantidade_bom) as bom,
             SUM(s.quantidade_mau) as mau
         FROM eleitoral_material_sobrante s
         JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
-        LEFT JOIN eleitoral_provincia p ON p.id = l.provincia_id
-        WHERE s.processo_id = ?
-        GROUP BY p.nome
+        WHERE s.processo_id = ? AND l.tipo = 'PROVINCIA'
+        GROUP BY l.nome
     '''
     c.execute(query, param)
     dados = c.fetchall()
@@ -1594,6 +1595,11 @@ def api_mapa_provincia():
         conn.close()
         return jsonify({'error': 'provincia em falta', 'itens': []})
 
+    if processo_id:
+        try:
+            processo_id = int(processo_id)
+        except (TypeError, ValueError):
+            processo_id = None
     if not processo_id:
         c.execute("SELECT id FROM eleitoral_processo_eleitoral WHERE estado = 'EM_CURSO' ORDER BY id DESC LIMIT 1")
         proc = c.fetchone()
@@ -1603,15 +1609,14 @@ def api_mapa_provincia():
         processo_id = proc['id'] if is_pg else proc['id']
 
     query = f'''
-        SELECT p.nome as provincia,
+        SELECT l.nome as provincia,
                SUM(s.quantidade_total) as total,
                SUM(s.quantidade_bom) as bom,
                SUM(s.quantidade_mau) as mau
         FROM eleitoral_material_sobrante s
         JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
-        LEFT JOIN eleitoral_provincia p ON p.id = l.provincia_id
-        WHERE s.processo_id = {pm} AND p.nome = {pm}
-        GROUP BY p.nome
+        WHERE s.processo_id = {pm} AND l.tipo = 'PROVINCIA' AND l.nome = {pm}
+        GROUP BY l.nome
     '''
     c.execute(query, (processo_id, provincia))
     resumo = c.fetchone()
@@ -1624,10 +1629,9 @@ def api_mapa_provincia():
                SUM(s.quantidade_mau) as mau
         FROM eleitoral_material_sobrante s
         JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
-        LEFT JOIN eleitoral_provincia p ON p.id = l.provincia_id
         JOIN eleitoral_tipo_material t ON s.tipo_material_id = t.id
         LEFT JOIN eleitoral_categoria_material c ON t.categoria_id = c.id
-        WHERE s.processo_id = {pm} AND p.nome = {pm}
+        WHERE s.processo_id = {pm} AND l.tipo = 'PROVINCIA' AND l.nome = {pm}
         GROUP BY t.nome, t.variante, c.nome, l.nome
         ORDER BY total DESC
     '''
