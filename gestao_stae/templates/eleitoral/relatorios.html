@@ -4,8 +4,9 @@
 <div class="header-actions" style="justify-content: space-between;">
     <h2>Relatórios Analíticos e Estatísticos</h2>
     <div style="display: flex; gap: 0.5rem;">
-        <a href="{{ url_for('eleitoral.exportar_excel', processo_id=processo_id, tipo_material_id=tipo_material_id) }}" class="btn btn-outline" style="color:#166534; border-color:#166534;">📊 Exportar Excel</a>
-        <button class="btn btn-outline" onclick="exportarRelatorioPDF()">📄 Exportar PDF</button>
+        <a href="{{ url_for('eleitoral.exportar_excel', processo_id=processo_id, tipo_material_id=tipo_material_id, categoria_id=categoria_id, local_id=local_id) }}" class="btn btn-outline" style="color:#166534; border-color:#166534;">📊 Exportar Excel</a>
+        <a href="{{ url_for('eleitoral.exportar_pdf', processo_id=processo_id, tipo_material_id=tipo_material_id, categoria_id=categoria_id, local_id=local_id) }}" class="btn btn-outline" style="color:#b91c1c; border-color:#b91c1c;">📄 Exportar PDF</a>
+        <button class="btn btn-outline" onclick="exportarRelatorioPDF()">🖨️ Imprimir</button>
     </div>
 </div>
 
@@ -22,10 +23,27 @@
         </div>
         <div style="flex:1;">
             <label style="display:block; font-size:0.8rem; color:#64748b; margin-bottom:0.2rem;">Tipo de Material:</label>
-            <select name="tipo_material_id" multiple class="btn btn-outline" style="width:100%; padding:0.5rem; text-align:left; background:#f8fafc; height:40px;">
+            <select name="tipo_material_id" multiple class="btn btn-outline" style="width:100%; padding:0.5rem; text-align:left; background:#f8fafc; height:60px;">
                 <option value="">Todos os Tipos de Material...</option>
                 {% for t in tipos_material %}
                 <option value="{{ t.id }}" {% if t.id|string in tipo_material_id %}selected{% endif %}>{{ t.nome }} {% if t.variante %}({{ t.variante }}){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="flex:1;">
+            <label style="display:block; font-size:0.8rem; color:#64748b; margin-bottom:0.2rem;">Categoria:</label>
+            <select name="categoria_id" multiple class="btn btn-outline" style="width:100%; padding:0.5rem; text-align:left; background:#f8fafc; height:60px;">
+                <option value="">Todas as Categorias...</option>
+                {% for cb in categorias %}
+                <option value="{{ cb.id }}" {% if cb.id|string in categoria_id %}selected{% endif %}>{{ cb.nome }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="flex:1;">
+            <label style="display:block; font-size:0.8rem; color:#64748b; margin-bottom:0.2rem;">Local de Armazenamento:</label>
+            <select name="local_id" multiple class="btn btn-outline" style="width:100%; padding:0.5rem; text-align:left; background:#f8fafc; height:60px;">
+                {% for lc in locais %}
+                <option value="{{ lc.id }}" {% if lc.id|string in local_id %}selected{% endif %}>{{ lc.nome }}</option>
                 {% endfor %}
             </select>
         </div>

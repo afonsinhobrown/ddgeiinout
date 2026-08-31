@@ -56,7 +56,7 @@
 
 <div class="card" style="margin-top: 1rem; position: relative;">
     <h3>Distribuição por Província (Mapa de Moçambique)</h3>
-    <p style="font-size:0.9rem; color:#64748b; margin-top:-0.5rem;">Passe o rato sobre cada província para ver o material alocado. A cor indica a quantidade relativa. Fonte do mapa: SimpleMaps.com (CC BY).</p>
+    <p style="font-size:0.9rem; color:#64748b; margin-top:-0.5rem;">Passe o rato sobre cada província para um resumo rápido ou <strong>clique</strong> para abrir o detalhe completo em texto. A cor indica a quantidade relativa. Fonte do mapa: SimpleMaps.com (CC BY).</p>
     <p id="mapaCarga" style="font-size:0.85rem; color:#94a3b8;">A carregar mapa...</p>
     
     <div style="text-align:center; overflow-x:auto;">
@@ -76,6 +76,31 @@
     <div id="mapTooltip" style="display:none; position:absolute; background:white; border:1px solid #cbd5e1; box-shadow:0 4px 10px rgba(0,0,0,0.2); padding:1rem; border-radius:8px; z-index:100; min-width: 220px; pointer-events:none;">
         <h4 id="ttProvName" style="margin-top:0; border-bottom:1px solid #e2e8f0; padding-bottom:0.5rem;">Província</h4>
         <div id="ttContent" style="font-size:0.9rem; margin-top:0.5rem;"></div>
+    </div>
+</div>
+
+<!-- Modal resumo da província -->
+<div id="provModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.6); z-index:200; align-items:center; justify-content:center; padding:1rem;">
+    <div style="background:white; border-radius:12px; max-width:640px; width:100%; max-height:85vh; overflow:auto; padding:1.5rem; box-shadow:0 20px 50px rgba(0,0,0,0.3);">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #e2e8f0; padding-bottom:0.75rem; margin-bottom:1rem;">
+            <h3 id="provModalTitle" style="margin:0; color:#1e293b;">Província</h3>
+            <button onclick="fecharProvModal()" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#64748b; line-height:1;">&times;</button>
+        </div>
+        <div style="display:flex; gap:0.75rem; margin-bottom:1.25rem;">
+            <div style="flex:1; text-align:center; background:#f1f5f9; border-radius:8px; padding:0.75rem;">
+                <div style="font-size:0.8rem; color:#64748b;">Total</div>
+                <div id="provModalTotal" style="font-size:1.6rem; font-weight:bold; color:#1e293b;">0</div>
+            </div>
+            <div style="flex:1; text-align:center; background:#dcfce7; border-radius:8px; padding:0.75rem;">
+                <div style="font-size:0.8rem; color:#166534;">Bom</div>
+                <div id="provModalBom" style="font-size:1.6rem; font-weight:bold; color:#22c55e;">0</div>
+            </div>
+            <div style="flex:1; text-align:center; background:#fee2e2; border-radius:8px; padding:0.75rem;">
+                <div style="font-size:0.8rem; color:#991b1b;">Mau</div>
+                <div id="provModalMau" style="font-size:1.6rem; font-weight:bold; color:#ef4444;">0</div>
+            </div>
+        </div>
+        <div id="provModalDetail" style="font-size:0.9rem;"></div>
     </div>
 </div>
 
@@ -224,12 +249,67 @@
                 el.addEventListener('mouseout', () => {
                     tooltip.style.display = 'none';
                 });
+
+                el.addEventListener('click', () => {
+                    abrirProvModal(chave);
+                });
             });
         })
         .catch(() => {
             document.getElementById('mapaCarga').innerText = 'Não foi possível carregar o mapa.';
         });
     });
+
+    function abrirProvModal(provincia) {
+        const modal = document.getElementById('provModal');
+        modal.style.display = 'flex';
+        document.getElementById('provModalTitle').innerText = provincia;
+        document.getElementById('provModalTotal').innerText = '...';
+        document.getElementById('provModalBom').innerText = '...';
+        document.getElementById('provModalMau').innerText = '...';
+        document.getElementById('provModalDetail').innerHTML = '<p style="color:#64748b;">A carregar detalhe...</p>';
+
+        fetch(`{{ url_for("eleitoral.api_mapa_provincia") }}?provincia=${encodeURIComponent(provincia)}`)
+        .then(res => res.json())
+        .then(d => {
+            document.getElementById('provModalTotal').innerText = Number(d.total) || 0;
+            document.getElementById('provModalBom').innerText = Number(d.bom) || 0;
+            document.getElementById('provModalMau').innerText = Number(d.mau) || 0;
+
+            if (!d.itens || d.itens.length === 0) {
+                document.getElementById('provModalDetail').innerHTML = '<p style="color:#94a3b8;">Sem material alocado nesta província.</p>';
+                return;
+            }
+
+            let html = '<table style="width:100%; border-collapse:collapse;">';
+            html += '<thead><tr style="border-bottom:2px solid #e2e8f0;">';
+            html += '<th style="text-align:left; padding:0.4rem;">Tipo de Material</th>';
+            html += '<th style="text-align:left; padding:0.4rem;">Local</th>';
+            html += '<th style="text-align:right; padding:0.4rem;">Total</th>';
+            html += '<th style="text-align:right; padding:0.4rem; color:#166534;">Bom</th>';
+            html += '<th style="text-align:right; padding:0.4rem; color:#991b1b;">Mau</th>';
+            html += '</tr></thead><tbody>';
+            d.itens.forEach(it => {
+                const tipo = it.tipo + (it.variante ? ' (' + it.variante + ')' : '');
+                html += `<tr style="border-bottom:1px solid #f1f5f9;">`;
+                html += `<td style="padding:0.4rem;">${tipo}</td>`;
+                html += `<td style="padding:0.4rem; color:#64748b;">${it.local}</td>`;
+                html += `<td style="text-align:right; padding:0.4rem;">${Number(it.total)||0}</td>`;
+                html += `<td style="text-align:right; padding:0.4rem; color:#166534;">${Number(it.bom)||0}</td>`;
+                html += `<td style="text-align:right; padding:0.4rem; color:#991b1b;">${Number(it.mau)||0}</td>`;
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            document.getElementById('provModalDetail').innerHTML = html;
+        })
+        .catch(() => {
+            document.getElementById('provModalDetail').innerHTML = '<p style="color:#dc2626;">Erro ao carregar o detalhe.</p>';
+        });
+    }
+
+    function fecharProvModal() {
+        document.getElementById('provModal').style.display = 'none';
+    }
 
 </script>
 {% endblock %}

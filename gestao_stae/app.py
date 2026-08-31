@@ -525,8 +525,8 @@ RELATORIOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD 
         <div style="display:flex; align-items:center; gap:1rem;">
             <button onclick="syncManual()" class="btn btn-outline" style="background:transparent; color:white; border:1px solid rgba(255,255,255,0.3); padding:0.3rem 0.6rem; font-size:0.8rem">🔄 Sincronizar</button>
             <a href="/" class="btn btn-outline" style="background:white; color:#0f172a;">⬅️ Voltar ao Início</a>
-            <a href="/relatorios/export/excel?tab={{ tab }}" class="btn btn-green">📊 Exportar Excel</a>
-            <a href="/relatorio_pdf" target="_blank" class="btn btn-blue">📄 Imprimir Relatório PDF</a>
+            <a href="/relatorios/export/excel?tab={{ tab }}&setor_id={{ setor_ids|join(',') }}&marca={{ marcas_list|join(',') }}&tipo_equipamento={{ tipos_eq_list|join(',') }}&status={{ status_list|join(',') }}&mov_tipo={{ mov_tipo|join(',') }}&data_inicio={{ data_inicio }}&data_fim={{ data_fim }}" class="btn btn-green">📊 Exportar Excel</a>
+            <a href="/relatorios/export/pdf?tab={{ tab }}&setor_id={{ setor_ids|join(',') }}&marca={{ marcas_list|join(',') }}&tipo_equipamento={{ tipos_eq_list|join(',') }}&status={{ status_list|join(',') }}&mov_tipo={{ mov_tipo|join(',') }}&data_inicio={{ data_inicio }}&data_fim={{ data_fim }}" class="btn btn-blue">📄 Exportar PDF</a>
         </div>
     </div>
     <div class="container">
@@ -540,24 +540,21 @@ RELATORIOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD 
             <form method="GET" action="/relatorios" class="toolbar">
                 <input type="hidden" name="tab" value="{{ tab }}">
                 <div>
-                    <label>Setor</label>
-                    <select name="setor_id" style="margin-top:0.2rem;">
-                        <option value="">Todos</option>
-                        {% for s in setores %}<option value="{{ s.id }}" {% if selected_setor == s.id|string %}selected{% endif %}>{{ s.nome }}</option>{% endfor %}
+                    <label>Setor (Ctrl+clique p/ vários)</label>
+                    <select name="setor_id" multiple size="3" style="margin-top:0.2rem;">
+                        {% for s in setores %}<option value="{{ s.id }}" {% if s.id|string in setor_ids %}selected{% endif %}>{{ s.nome }}</option>{% endfor %}
                     </select>
                 </div>
                 <div>
-                    <label>Marca</label>
-                    <select name="marca" style="margin-top:0.2rem;">
-                        <option value="">Todas</option>
-                        {% for m in marcas %}<option value="{{ m.nome }}" {% if selected_marca == m.nome %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}
+                    <label>Marca (Ctrl+clique p/ vários)</label>
+                    <select name="marca" multiple size="3" style="margin-top:0.2rem;">
+                        {% for m in marcas %}<option value="{{ m.nome }}" {% if m.nome in marcas_list %}selected{% endif %}>{{ m.nome }}</option>{% endfor %}
                     </select>
                 </div>
                 <div>
-                    <label>Tipo de Equipamento</label>
-                    <select name="tipo_equipamento" style="margin-top:0.2rem;">
-                        <option value="">Todos</option>
-                        {% for t in tipos_eq %}<option value="{{ t.nome }}" {% if selected_tipo_eq == t.nome %}selected{% endif %}>{{ t.nome }}</option>{% endfor %}
+                    <label>Tipo de Equipamento (Ctrl+clique p/ vários)</label>
+                    <select name="tipo_equipamento" multiple size="3" style="margin-top:0.2rem;">
+                        {% for t in tipos_eq %}<option value="{{ t.nome }}" {% if t.nome in tipos_eq_list %}selected{% endif %}>{{ t.nome }}</option>{% endfor %}
                     </select>
                 </div>
                 {% if tab in ('entradas_saidas', 'movimentos') %}
@@ -572,18 +569,23 @@ RELATORIOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD 
                 {% endif %}
                 {% if tab == 'inventario' or tab == 'movimentos' %}
                 <div>
-                    <label>Status/Estado</label>
-                    <input type="text" name="status" value="{{ selected_status }}" placeholder="Ex: Disponível" style="margin-top:0.2rem;">
+                    <label>Status/Estado (Ctrl+clique p/ vários)</label>
+                    <select name="status" multiple size="3" style="margin-top:0.2rem;">
+                        <option value="Disponível" {% if 'Disponível' in status_list %}selected{% endif %}>Disponível</option>
+                        <option value="Indisponível" {% if 'Indisponível' in status_list %}selected{% endif %}>Indisponível</option>
+                        <option value="Pendente" {% if 'Pendente' in status_list %}selected{% endif %}>Pendente</option>
+                        <option value="Em estoque" {% if 'Em estoque' in status_list %}selected{% endif %}>Em estoque</option>
+                        <option value="Entregue" {% if 'Entregue' in status_list %}selected{% endif %}>Entregue</option>
+                    </select>
                 </div>
                 {% endif %}
                 {% if tab == 'movimentos' %}
                 <div>
-                    <label>Tipo de Movimento</label>
-                    <select name="mov_tipo" style="margin-top:0.2rem;">
-                        <option value="">Todos</option>
-                        <option value="ENTRADA" {% if mov_tipo == 'ENTRADA' %}selected{% endif %}>Entrada</option>
-                        <option value="SAIDA" {% if mov_tipo == 'SAIDA' %}selected{% endif %}>Saída</option>
-                        <option value="TRANSFERENCIA" {% if mov_tipo == 'TRANSFERENCIA' %}selected{% endif %}>Transferência</option>
+                    <label>Tipo de Movimento (Ctrl+clique p/ vários)</label>
+                    <select name="mov_tipo" multiple size="3" style="margin-top:0.2rem;">
+                        <option value="ENTRADA" {% if 'ENTRADA' in mov_tipo %}selected{% endif %}>Entrada</option>
+                        <option value="SAIDA" {% if 'SAIDA' in mov_tipo %}selected{% endif %}>Saída</option>
+                        <option value="TRANSFERENCIA" {% if 'TRANSFERENCIA' in mov_tipo %}selected{% endif %}>Transferência</option>
                     </select>
                 </div>
                 {% endif %}
@@ -4186,13 +4188,14 @@ def relatorios():
         return redirect(url_for('index', msg="Erro: Apenas administradores têm acesso aos relatórios."))
         
     tab = request.args.get('tab', 'inventario')
-    setor_id = request.args.get('setor_id', '')
-    status = request.args.get('status', '')
-    marca = request.args.get('marca', '')
-    tipo_equipamento = request.args.get('tipo_equipamento', '')
+    setor_ids = [x for x in request.args.getlist('setor_id') if x]
+    status_list = [x for x in request.args.getlist('status') if x]
+    marcas = [x for x in request.args.getlist('marca') if x]
+    tipos_eq = [x for x in request.args.getlist('tipo_equipamento') if x]
     data_inicio = request.args.get('data_inicio', '')
     data_fim = request.args.get('data_fim', '')
-    mov_tipo = request.args.get('mov_tipo', '')
+    mov_tipo = request.args.getlist('mov_tipo')
+    mov_tipo = [x for x in mov_tipo if x]
     
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -4201,11 +4204,14 @@ def relatorios():
     c.execute("SELECT id, nome FROM setores")
     setores = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM marcas")
-    marcas = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
+    marcas_opcoes = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM tipos_equipamento")
-    tipos_eq = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
+    tipos_eq_opcoes = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     
     items = []
+
+    def pl(n):
+        return ','.join('?' * len(n))
     
     if tab == 'inventario':
         query = '''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
@@ -4214,18 +4220,18 @@ def relatorios():
                    LEFT JOIN setores s ON i.setor_id = s.id 
                    WHERE i.status != 'Pendente' '''
         params = []
-        if setor_id:
-            query += " AND i.setor_id = ?"
-            params.append(int(setor_id))
-        if status:
-            query += " AND i.status = ?"
-            params.append(status)
-        if marca:
-            query += " AND i.marca = ?"
-            params.append(marca)
-        if tipo_equipamento:
-            query += " AND i.equipamento = ?"
-            params.append(tipo_equipamento)
+        if setor_ids:
+            query += f" AND i.setor_id IN ({pl(setor_ids)})"
+            params.extend(int(x) for x in setor_ids)
+        if status_list:
+            query += f" AND i.status IN ({pl(status_list)})"
+            params.extend(status_list)
+        if marcas:
+            query += f" AND i.marca IN ({pl(marcas)})"
+            params.extend(marcas)
+        if tipos_eq:
+            query += f" AND i.equipamento IN ({pl(tipos_eq)})"
+            params.extend(tipos_eq)
             
         query += " ORDER BY i.id DESC"
         c.execute(query, params)
@@ -4238,15 +4244,17 @@ def relatorios():
                    FROM movimentos m 
                    WHERE m.tipo IN ('ENTRADA', 'SAIDA') '''
         params = []
-        if setor_id:
-            query += " AND (m.setor_origem_id = ? OR m.setor_destino_id = ?)"
-            params.extend([int(setor_id), int(setor_id)])
-        if marca:
-            query += " AND m.marca = ?"
-            params.append(marca)
-        if tipo_equipamento:
-            query += " AND m.equipamento = ?"
-            params.append(tipo_equipamento)
+        if setor_ids:
+            ph = pl(setor_ids)
+            query += f" AND (m.setor_origem_id IN ({ph}) OR m.setor_destino_id IN ({ph}))"
+            params.extend(int(x) for x in setor_ids)
+            params.extend(int(x) for x in setor_ids)
+        if marcas:
+            query += f" AND m.marca IN ({pl(marcas)})"
+            params.extend(marcas)
+        if tipos_eq:
+            query += f" AND m.equipamento IN ({pl(tipos_eq)})"
+            params.extend(tipos_eq)
         if data_inicio:
             query += " AND m.data >= ?"
             params.append(data_inicio)
@@ -4266,14 +4274,19 @@ def relatorios():
                    WHERE 1=1 '''
         params = []
         if mov_tipo:
-            query += " AND m.tipo = ?"
-            params.append(mov_tipo)
-        if status:
-            query += " AND m.status = ?"
-            params.append(status)
-        if setor_id:
-            query += " AND (m.setor_origem_id = ? OR m.setor_destino_id = ?)"
-            params.extend([int(setor_id), int(setor_id)])
+            query += f" AND m.tipo IN ({pl(mov_tipo)})"
+            params.extend(mov_tipo)
+        if status_list:
+            query += f" AND m.status IN ({pl(status_list)})"
+            params.extend(status_list)
+        if setor_ids:
+            ph = pl(setor_ids)
+            query += f" AND (m.setor_origem_id IN ({ph}) OR m.setor_destino_id IN ({ph}))"
+            params.extend(int(x) for x in setor_ids)
+            params.extend(int(x) for x in setor_ids)
+        if marcas:
+            query += f" AND m.marca IN ({pl(marcas)})"
+            params.extend(marcas)
         if data_inicio:
             query += " AND m.data >= ?"
             params.append(data_inicio)
@@ -4317,12 +4330,12 @@ def relatorios():
         tab=tab,
         items=items,
         setores=setores,
-        marcas=marcas,
-        tipos_eq=tipos_eq,
-        selected_setor=setor_id,
-        selected_status=status,
-        selected_marca=marca,
-        selected_tipo_eq=tipo_equipamento,
+        marcas=marcas_opcoes,
+        tipos_eq=tipos_eq_opcoes,
+        setor_ids=setor_ids,
+        status_list=status_list,
+        marcas_list=marcas,
+        tipos_eq_list=tipos_eq,
         data_inicio=data_inicio,
         data_fim=data_fim,
         mov_tipo=mov_tipo,
@@ -4337,13 +4350,13 @@ def relatorios_export(format_type):
         return abort(403)
         
     tab = request.args.get('tab', 'inventario')
-    setor_id = request.args.get('setor_id', '')
-    status = request.args.get('status', '')
-    marca = request.args.get('marca', '')
-    tipo_equipamento = request.args.get('tipo_equipamento', '')
     data_inicio = request.args.get('data_inicio', '')
     data_fim = request.args.get('data_fim', '')
-    mov_tipo = request.args.get('mov_tipo', '')
+    setor_ids = [x for x in request.args.get('setor_id', '').split(',') if x]
+    status_list = [x for x in request.args.get('status', '').split(',') if x]
+    marcas = [x for x in request.args.get('marca', '').split(',') if x]
+    tipos_eq = [x for x in request.args.get('tipo_equipamento', '').split(',') if x]
+    mov_tipo = [x for x in request.args.get('mov_tipo', '').split(',') if x]
     
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -4351,6 +4364,9 @@ def relatorios_export(format_type):
     headers = []
     rows = []
     title = ""
+
+    def pl(n):
+        return ','.join('?' * len(n))
     
     if tab == 'inventario':
         title = "Relatório de Inventário"
@@ -4361,18 +4377,18 @@ def relatorios_export(format_type):
                    LEFT JOIN setores s ON i.setor_id = s.id 
                    WHERE i.status != 'Pendente' '''
         params = []
-        if setor_id:
-            query += " AND i.setor_id = ?"
-            params.append(int(setor_id))
-        if status:
-            query += " AND i.status = ?"
-            params.append(status)
-        if marca:
-            query += " AND i.marca = ?"
-            params.append(marca)
-        if tipo_equipamento:
-            query += " AND i.equipamento = ?"
-            params.append(tipo_equipamento)
+        if setor_ids:
+            query += f" AND i.setor_id IN ({pl(setor_ids)})"
+            params.extend(int(x) for x in setor_ids)
+        if status_list:
+            query += f" AND i.status IN ({pl(status_list)})"
+            params.extend(status_list)
+        if marcas:
+            query += f" AND i.marca IN ({pl(marcas)})"
+            params.extend(marcas)
+        if tipos_eq:
+            query += f" AND i.equipamento IN ({pl(tipos_eq)})"
+            params.extend(tipos_eq)
         query += " ORDER BY i.id DESC"
         c.execute(query, params)
         rows = c.fetchall()
@@ -4385,15 +4401,17 @@ def relatorios_export(format_type):
                    FROM movimentos m 
                    WHERE m.tipo IN ('ENTRADA', 'SAIDA') '''
         params = []
-        if setor_id:
-            query += " AND (m.setor_origem_id = ? OR m.setor_destino_id = ?)"
-            params.extend([int(setor_id), int(setor_id)])
-        if marca:
-            query += " AND m.marca = ?"
-            params.append(marca)
-        if tipo_equipamento:
-            query += " AND m.equipamento = ?"
-            params.append(tipo_equipamento)
+        if setor_ids:
+            ph = pl(setor_ids)
+            query += f" AND (m.setor_origem_id IN ({ph}) OR m.setor_destino_id IN ({ph}))"
+            params.extend(int(x) for x in setor_ids)
+            params.extend(int(x) for x in setor_ids)
+        if marcas:
+            query += f" AND m.marca IN ({pl(marcas)})"
+            params.extend(marcas)
+        if tipos_eq:
+            query += f" AND m.equipamento IN ({pl(tipos_eq)})"
+            params.extend(tipos_eq)
         if data_inicio:
             query += " AND m.data >= ?"
             params.append(data_inicio)
@@ -4413,14 +4431,19 @@ def relatorios_export(format_type):
                    WHERE 1=1 '''
         params = []
         if mov_tipo:
-            query += " AND m.tipo = ?"
-            params.append(mov_tipo)
-        if status:
-            query += " AND m.status = ?"
-            params.append(status)
-        if setor_id:
-            query += " AND (m.setor_origem_id = ? OR m.setor_destino_id = ?)"
-            params.extend([int(setor_id), int(setor_id)])
+            query += f" AND m.tipo IN ({pl(mov_tipo)})"
+            params.extend(mov_tipo)
+        if status_list:
+            query += f" AND m.status IN ({pl(status_list)})"
+            params.extend(status_list)
+        if setor_ids:
+            ph = pl(setor_ids)
+            query += f" AND (m.setor_origem_id IN ({ph}) OR m.setor_destino_id IN ({ph}))"
+            params.extend(int(x) for x in setor_ids)
+            params.extend(int(x) for x in setor_ids)
+        if marcas:
+            query += f" AND m.marca IN ({pl(marcas)})"
+            params.extend(marcas)
         if data_inicio:
             query += " AND m.data >= ?"
             params.append(data_inicio)
@@ -4434,6 +4457,65 @@ def relatorios_export(format_type):
     conn.close()
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    if format_type == 'pdf':
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        from reportlab.lib.units import mm
+        output = io.BytesIO()
+        doc = SimpleDocTemplate(output, pagesize=landscape(A4), rightMargin=12*mm, leftMargin=12*mm, topMargin=12*mm, bottomMargin=12*mm)
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle('Titulo', parent=styles['Title'], fontSize=16, alignment=1, spaceAfter=6)
+        sub_style = ParagraphStyle('Sub', parent=styles['Normal'], fontSize=11, alignment=1, spaceAfter=10, textColor=colors.HexColor('#475569'))
+        head_style = ParagraphStyle('Hd', parent=styles['Normal'], fontSize=8, fontWeight='bold', textColor=colors.white)
+
+        elementos = []
+        elementos.append(Paragraph("REPÚBLICA DE MOÇAMBIQUE", title_style))
+        elementos.append(Paragraph("STAE — Secretariado Técnico de Administração Eleitoral", sub_style))
+        elementos.append(Paragraph(f"<b>{title}</b>", styles['Heading2']))
+        criterios = []
+        if setor_ids:
+            criterios.append(f"{len(setor_ids)} setor(es)")
+        if marcas:
+            criterios.append(f"{len(marcas)} marca(s)")
+        if tipos_eq:
+            criterios.append(f"{len(tipos_eq)} tipo(s) de equipamento")
+        if status_list:
+            criterios.append(f"{len(status_list)} estado(s)")
+        if mov_tipo:
+            criterios.append(f"{len(mov_tipo)} tipo(s) de movimento")
+        if data_inicio:
+            criterios.append(f"desde {data_inicio}")
+        if data_fim:
+            criterios.append(f"até {data_fim}")
+        if criterios:
+            elementos.append(Paragraph("Critérios aplicados: " + ", ".join(criterios) + ".", styles['Normal']))
+        elementos.append(Spacer(1, 8))
+
+        if rows:
+            col_widths = [doc.width / len(headers)] * len(headers)
+            data = [[Paragraph(h, head_style) for h in headers]]
+            for r in rows:
+                data.append([str(v) if v is not None else '' for v in r])
+            tab = Table(data, colWidths=col_widths, repeatRows=1)
+            tab.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e293b')),
+                ('GRID', (0,0), (-1,-1), 0.4, colors.HexColor('#cbd5e1')),
+                ('FONTSIZE', (0,0), (-1,-1), 7),
+                ('TOPPADDING', (0,0), (-1,-1), 3),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f8fafc')]),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ]))
+            elementos.append(tab)
+        else:
+            elementos.append(Paragraph("Sem dados para os critérios selecionados.", styles['Normal']))
+
+        doc.build(elementos)
+        output.seek(0)
+        return send_file(output, download_name=f"relatorio_{timestamp}.pdf", as_attachment=True, mimetype="application/pdf")
     
     if format_type == 'excel':
         import openpyxl

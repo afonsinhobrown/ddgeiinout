@@ -1097,6 +1097,191 @@ def exportar_excel():
     return send_file(output, download_name="relatorio_estatistico.xlsx", as_attachment=True, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
+@eleitoral_bp.route('/relatorios/exportar_pdf')
+def exportar_pdf():
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
+
+    processo_id = request.args.get('processo_id')
+    tipo_material_id = request.args.getlist('tipo_material_id')
+    tipo_material_id = [x for x in tipo_material_id if x]
+    categoria_id = request.args.getlist('categoria_id')
+    categoria_id = [x for x in categoria_id if x]
+    local_id = request.args.getlist('local_id')
+    local_id = [x for x in local_id if x]
+
+    conds = []
+    params = []
+    if processo_id:
+        conds.append(f"s.processo_id = {'%s' if is_pg else '?'}")
+        params.append(processo_id)
+    if tipo_material_id:
+        placeholders = ','.join(['%s' if is_pg else '?'] * len(tipo_material_id))
+        conds.append(f"s.tipo_material_id IN ({placeholders})")
+        params.extend(tipo_material_id)
+    if categoria_id:
+        placeholders = ','.join(['%s' if is_pg else '?'] * len(categoria_id))
+        conds.append(f"t.categoria_id IN ({placeholders})")
+        params.extend(categoria_id)
+    if local_id and not (len(local_id) == 1 and local_id[0] == ''):
+        placeholders = ','.join(['%s' if is_pg else '?'] * len(local_id))
+        conds.append(f"s.local_id IN ({placeholders})")
+        params.extend(local_id)
+
+    cond_proc = "WHERE " + " AND ".join(conds) if conds else ""
+    param = tuple(params)
+
+    desc_processo = "Todos os Processos"
+    if processo_id:
+        c.execute(f"SELECT nome, ano FROM eleitoral_processo_eleitoral WHERE id = {'%s' if is_pg else '?'}", (processo_id,))
+        pr = c.fetchone()
+        if pr:
+            desc_processo = f"{pr['nome' if is_pg else 'nome']} ({pr['ano' if is_pg else 'ano']})"
+
+    # Totais globais
+    c.execute(f"SELECT COALESCE(SUM(quantidade_total),0) as t, COALESCE(SUM(quantidade_bom),0) as b, COALESCE(SUM(quantidade_mau),0) as m FROM eleitoral_material_sobrante s {cond_proc}", param)
+    row = c.fetchone()
+    totais = {
+        'total': row['t' if is_pg else 't'] or 0,
+        'bom': row['b' if is_pg else 'b'] or 0,
+        'mau': row['m' if is_pg else 'm'] or 0
+    }
+
+    # Por categoria
+    c.execute(f'''
+        SELECT c.nome as categoria, t.nome as tipo, t.variante, SUM(s.quantidade_total) as total, SUM(s.quantidade_bom) as bom, SUM(s.quantidade_mau) as mau
+        FROM eleitoral_material_sobrante s
+        JOIN eleitoral_tipo_material t ON s.tipo_material_id = t.id
+        JOIN eleitoral_categoria_material c ON t.categoria_id = c.id
+        {cond_proc}
+        GROUP BY c.nome, t.nome, t.variante
+        ORDER BY c.nome, total DESC
+    ''', param)
+    relatorio_categoria = c.fetchall()
+
+    # Por local
+    c.execute(f'''
+        SELECT l.nome as provincia, t.nome as tipo, t.variante, SUM(s.quantidade_total) as total, SUM(s.quantidade_bom) as bom, SUM(s.quantidade_mau) as mau
+        FROM eleitoral_material_sobrante s
+        JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
+        JOIN eleitoral_tipo_material t ON s.tipo_material_id = t.id
+        {cond_proc}
+        GROUP BY l.nome, t.nome, t.variante
+        ORDER BY l.nome, total DESC
+    ''', param)
+    relatorio_provincia = c.fetchall()
+
+    conn.close()
+
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+
+    output = io.BytesIO()
+    doc = SimpleDocTemplate(output, pagesize=landscape(A4), rightMargin=12*mm, leftMargin=12*mm, topMargin=12*mm, bottomMargin=12*mm)
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle('Titulo', parent=styles['Title'], fontSize=16, alignment=1, spaceAfter=6)
+    sub_style = ParagraphStyle('Sub', parent=styles['Normal'], fontSize=11, alignment=1, spaceAfter=12, textColor=colors.HexColor('#475569'))
+    head_style = ParagraphStyle('Hd', parent=styles['Normal'], fontSize=9, fontWeight='bold', textColor=colors.white)
+
+    elementos = []
+
+    elementos.append(Paragraph("REPÚBLICA DE MOÇAMBIQUE", title_style))
+    elementos.append(Paragraph("STAE — Gestão Eleitoral · Relatório Estatístico de Material Sobrante", sub_style))
+    elementos.append(Paragraph(f"<b>Processo:</b> {desc_processo}", styles['Normal']))
+    if tipo_material_id:
+        elementos.append(Paragraph(f"<b>Tipos de Material selecionados:</b> {len(tipo_material_id)}", styles['Normal']))
+    if categoria_id:
+        elementos.append(Paragraph(f"<b>Categorias selecionadas:</b> {len(categoria_id)}", styles['Normal']))
+    if local_id and not (len(local_id) == 1 and local_id[0] == ''):
+        elementos.append(Paragraph(f"<b>Locais selecionados:</b> {len(local_id)}", styles['Normal']))
+    elementos.append(Spacer(1, 8))
+
+    # Resumo
+    resumo_data = [
+        [Paragraph("Total Global", head_style), Paragraph("Bom Estado", head_style), Paragraph("Mau Estado", head_style)],
+        [str(totais['total']), str(totais['bom']), str(totais['mau'])]
+    ]
+    resumo_tab = Table(resumo_data, colWidths=[doc.width/3.0]*3)
+    resumo_tab.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e293b')),
+        ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('FONTSIZE', (0,0), (-1,-1), 11),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
+        ('BACKGROUND', (0,1), (-1,1), colors.HexColor('#f1f5f9')),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+    ]))
+    elementos.append(resumo_tab)
+    elementos.append(Spacer(1, 14))
+
+    # Tabela por categoria
+    if relatorio_categoria:
+        elementos.append(Paragraph("Agregação por Categoria", styles['Heading2']))
+        data = [[Paragraph("Categoria", head_style), Paragraph("Tipo de Material", head_style),
+                 Paragraph("Total", head_style), Paragraph("Bom", head_style), Paragraph("Mau", head_style)]]
+        for r in relatorio_categoria:
+            tipo_str = f"{r['tipo' if is_pg else 'tipo']}"
+            if r['variante' if is_pg else 'variante']:
+                tipo_str += f" ({r['variante' if is_pg else 'variante']})"
+            data.append([
+                f"{r['categoria' if is_pg else 'categoria']}",
+                tipo_str,
+                f"{r['total' if is_pg else 'total']}",
+                f"{r['bom' if is_pg else 'bom']}",
+                f"{r['mau' if is_pg else 'mau']}"
+            ])
+        tab = Table(data, repeatRows=1)
+        tab.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e293b')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
+            ('FONTSIZE', (0,0), (-1,-1), 8),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f8fafc')]),
+            ('ALIGN', (2,0), (-1,-1), 'RIGHT'),
+        ]))
+        elementos.append(tab)
+        elementos.append(Spacer(1, 12))
+
+    # Tabela por local
+    if relatorio_provincia:
+        elementos.append(Paragraph("Totais por Local de Armazenamento", styles['Heading2']))
+        data = [[Paragraph("Local", head_style), Paragraph("Tipo de Material", head_style),
+                 Paragraph("Total", head_style), Paragraph("Bom", head_style), Paragraph("Mau", head_style)]]
+        for r in relatorio_provincia:
+            tipo_str = f"{r['tipo' if is_pg else 'tipo']}"
+            if r['variante' if is_pg else 'variante']:
+                tipo_str += f" ({r['variante' if is_pg else 'variante']})"
+            data.append([
+                f"{r['provincia' if is_pg else 'provincia']}",
+                tipo_str,
+                f"{r['total' if is_pg else 'total']}",
+                f"{r['bom' if is_pg else 'bom']}",
+                f"{r['mau' if is_pg else 'mau']}"
+            ])
+        tab = Table(data, repeatRows=1)
+        tab.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e293b')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
+            ('FONTSIZE', (0,0), (-1,-1), 8),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f8fafc')]),
+            ('ALIGN', (2,0), (-1,-1), 'RIGHT'),
+        ]))
+        elementos.append(tab)
+
+    doc.build(elementos)
+    output.seek(0)
+    return send_file(output, download_name="relatorio_estatistico.pdf", as_attachment=True, mimetype="application/pdf")
+
+
 @eleitoral_bp.route('/relatorios')
 def relatorios():
     conn, is_pg = get_eleitoral_db()
@@ -1108,11 +1293,21 @@ def relatorios():
     
     c.execute("SELECT id, nome, variante FROM eleitoral_tipo_material ORDER BY nome")
     tipos_material = c.fetchall()
-    
+
+    c.execute("SELECT id, nome FROM eleitoral_categoria_material ORDER BY nome")
+    categorias = c.fetchall()
+
+    c.execute("SELECT id, nome FROM eleitoral_local_armazenamento ORDER BY nome")
+    locais = c.fetchall()
+
     processo_id = request.args.get('processo_id')
     tipo_material_id = request.args.getlist('tipo_material_id')
     tipo_material_id = [x for x in tipo_material_id if x]
-    
+    categoria_id = request.args.getlist('categoria_id')
+    categoria_id = [x for x in categoria_id if x]
+    local_id = request.args.getlist('local_id')
+    local_id = [x for x in local_id if x]
+
     conds = []
     params = []
     if processo_id:
@@ -1122,6 +1317,14 @@ def relatorios():
         placeholders = ','.join(['%s' if is_pg else '?'] * len(tipo_material_id))
         conds.append(f"s.tipo_material_id IN ({placeholders})")
         params.extend(tipo_material_id)
+    if categoria_id:
+        placeholders = ','.join(['%s' if is_pg else '?'] * len(categoria_id))
+        conds.append(f"t.categoria_id IN ({placeholders})")
+        params.extend(categoria_id)
+    if local_id and not (len(local_id) == 1 and local_id[0] == ''):
+        placeholders = ','.join(['%s' if is_pg else '?'] * len(local_id))
+        conds.append(f"s.local_id IN ({placeholders})")
+        params.extend(local_id)
         
     cond_proc = "WHERE " + " AND ".join(conds) if conds else ""
     param = tuple(params)
@@ -1175,6 +1378,8 @@ def relatorios():
     return render_template('eleitoral/relatorios.html', processos=processos, 
                            processo_id=processo_id, tipo_material_id=tipo_material_id, 
                            tipos_material=tipos_material,
+                           categoria_id=categoria_id, categorias=categorias,
+                           local_id=local_id, locais=locais,
                            resumo=resumo, relatorio_categoria=relatorio_categoria, 
                            relatorio_tipo=relatorio_tipo, relatorio_provincia=relatorio_provincia)
 
@@ -1374,6 +1579,82 @@ def api_mapa_distribuicao():
             }
             
     return jsonify(resultado)
+
+
+@eleitoral_bp.route('/api/mapa_provincia')
+def api_mapa_provincia():
+    conn, is_pg = get_eleitoral_db()
+    c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if is_pg else conn.cursor()
+    pm = '%s' if is_pg else '?'
+
+    provincia = (request.args.get('provincia') or '').strip()
+    processo_id = request.args.get('processo_id') or None
+
+    if not provincia:
+        conn.close()
+        return jsonify({'error': 'provincia em falta', 'itens': []})
+
+    if not processo_id:
+        c.execute("SELECT id FROM eleitoral_processo_eleitoral WHERE estado = 'EM_CURSO' ORDER BY id DESC LIMIT 1")
+        proc = c.fetchone()
+        if not proc:
+            conn.close()
+            return jsonify({'provincia': provincia, 'total': 0, 'bom': 0, 'mau': 0, 'locais': [], 'itens': []})
+        processo_id = proc['id'] if is_pg else proc['id']
+
+    query = f'''
+        SELECT p.nome as provincia,
+               SUM(s.quantidade_total) as total,
+               SUM(s.quantidade_bom) as bom,
+               SUM(s.quantidade_mau) as mau
+        FROM eleitoral_material_sobrante s
+        JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
+        LEFT JOIN eleitoral_provincia p ON p.id = l.provincia_id
+        WHERE s.processo_id = {pm} AND p.nome = {pm}
+        GROUP BY p.nome
+    '''
+    c.execute(query, (processo_id, provincia))
+    resumo = c.fetchone()
+
+    itens_query = f'''
+        SELECT t.nome as tipo, t.variante as variante, c.nome as categoria,
+               l.nome as local, 
+               SUM(s.quantidade_total) as total,
+               SUM(s.quantidade_bom) as bom,
+               SUM(s.quantidade_mau) as mau
+        FROM eleitoral_material_sobrante s
+        JOIN eleitoral_local_armazenamento l ON s.local_id = l.id
+        LEFT JOIN eleitoral_provincia p ON p.id = l.provincia_id
+        JOIN eleitoral_tipo_material t ON s.tipo_material_id = t.id
+        LEFT JOIN eleitoral_categoria_material c ON t.categoria_id = c.id
+        WHERE s.processo_id = {pm} AND p.nome = {pm}
+        GROUP BY t.nome, t.variante, c.nome, l.nome
+        ORDER BY total DESC
+    '''
+    c.execute(itens_query, (processo_id, provincia))
+    itens = c.fetchall()
+
+    conn.close()
+
+    def g(d, k):
+        return d[k if is_pg else k]
+
+    return jsonify({
+        'provincia': provincia,
+        'total': g(resumo, 'total') if resumo else 0,
+        'bom': g(resumo, 'bom') if resumo else 0,
+        'mau': g(resumo, 'mau') if resumo else 0,
+        'itens': [{
+            'tipo': g(it, 'tipo'),
+            'variante': g(it, 'variante'),
+            'categoria': g(it, 'categoria'),
+            'local': g(it, 'local'),
+            'total': g(it, 'total'),
+            'bom': g(it, 'bom'),
+            'mau': g(it, 'mau')
+        } for it in itens]
+    })
+
 
 @eleitoral_bp.route('/distribuicao/<int:id>/estado', methods=['POST'])
 def atualizar_estado_movimento(id):
