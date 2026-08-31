@@ -255,6 +255,7 @@ def check_db_integrity(c):
         if 'local_destino' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN local_destino TEXT")
         if 'estado_rastreio' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN estado_rastreio TEXT")
         if 'confirmado_destino' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN confirmado_destino TEXT")
+        if 'departamento_responsavel_id' not in cols: c.execute("ALTER TABLE movimentos ADD COLUMN departamento_responsavel_id INTEGER")
         
         c.execute("PRAGMA table_info(inventario_local)")
         inv_cols = [row[1] for row in c.fetchall()]
@@ -832,6 +833,12 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                             <select name="agente_protecao" id="ent_protecao"></select>
                         </div>
                     </div>
+                    <div style="grid-column: span 2;">
+                        <label>Departamento Responsável (aparece na guia)</label>
+                        <select name="departamento_responsavel_id" required>
+                            {% for s in setores %}<option value="{{s.id}}" {% if s.id == session.setor_id %}selected{% endif %}>{{s.nome}}</option>{% endfor %}
+                        </select>
+                    </div>
                 </div>
                 <button type="submit" class="btn btn-green" style="margin-top:1.5rem; width:100%">CONFIRMAR ENTRADA</button>
             </form>
@@ -926,6 +933,12 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                             <label style="font-size:0.9rem; color:#64748b">Agente de Protecção</label>
                             <select name="agente_protecao" id="sai_protecao"></select>
                         </div>
+                    </div>
+                    <div style="grid-column: span 2;">
+                        <label>Departamento Responsável (aparece na guia)</label>
+                        <select name="departamento_responsavel_id" required>
+                            {% for s in setores %}<option value="{{s.id}}" {% if s.id == session.setor_id %}selected{% endif %}>{{s.nome}}</option>{% endfor %}
+                        </select>
                     </div>
                 </div>
                 <button type="submit" class="btn btn-blue" style="margin-top:1.5rem; width:100%">GERAR GUIA</button>
@@ -1325,8 +1338,10 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
                         </select>
                     </div>
                     <div>
-                        <label>Origem (Leitura Apenas)</label>
-                        <input type="text" value="DEPARTAMENTO DE DELIMITAÇÃO GEOGRÁFICA, ESTATÍSTICA E INFORMÁTICA" readonly style="background:#f1f5f9; color:#475569;">
+                        <label>Departamento Responsável (aparece na guia)</label>
+                        <select name="departamento_responsavel_id" required>
+                            {% for s in setores %}<option value="{{s.id}}" {% if s.id == session.setor_id %}selected{% endif %}>{{s.nome}}</option>{% endfor %}
+                        </select>
                     </div>
                     <div>
                         <label>Destino (Origem da Entrada)</label>
@@ -2232,8 +2247,10 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                 <input type="hidden" name="inventario_id" id="sri_inventario_id">
                 <div class="form-grid">
                     <div>
-                        <label>Origem (Leitura Apenas)</label>
-                        <input type="text" value="DEPARTAMENTO DE DELIMITAÇÃO GEOGRÁFICA, ESTATÍSTICA E INFORMÁTICA" readonly style="background:#f1f5f9; color:#475569;">
+                        <label>Departamento Responsável (aparece na guia)</label>
+                        <select name="departamento_responsavel_id" required>
+                            {% for s in setores %}<option value="{{s.id}}" {% if s.id == session.setor_id %}selected{% endif %}>{{s.nome}}</option>{% endfor %}
+                        </select>
                     </div>
                     <div>
                         <label>Destino</label>
@@ -3386,9 +3403,14 @@ def registrar_entrada():
     if 'repara' in motivo_entrada.lower() and (not numero_serie or numero_serie.upper() in ('N/A', 'NA', 'N/D', '-')):
         numero_serie = guia
         flash("Atenção: equipamento sem número de série. Foi registado o nº da guia de entrada como identificador.")
-    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, codigo_barras, documento_pdf, estado_rastreio) 
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia, "ENTRADA", request.form['equipamento'], origem_destino, motivo_entrada, datetime.now().strftime("%Y-%m-%d"), "Em estoque", None, numero_serie, request.form.get('marca',''), entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), request.form.get('quantidade', '1'), setor_origem_id, setor_destino_id, codigo_barras, documento_pdf, 'EM_ESTOQUE'))
+    departamento_raw = request.form.get('departamento_responsavel_id', '').strip()
+    try:
+        departamento_responsavel_id = int(departamento_raw) if departamento_raw else (session.get('setor_id') or setor_destino_id)
+    except (TypeError, ValueError):
+        departamento_responsavel_id = session.get('setor_id') or setor_destino_id
+    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, codigo_barras, documento_pdf, estado_rastreio, departamento_responsavel_id) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
+              (guia, "ENTRADA", request.form['equipamento'], origem_destino, motivo_entrada, datetime.now().strftime("%Y-%m-%d"), "Em estoque", None, numero_serie, request.form.get('marca',''), entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), request.form.get('quantidade', '1'), setor_origem_id, setor_destino_id, codigo_barras, documento_pdf, 'EM_ESTOQUE', departamento_responsavel_id))
     conn.commit()
     conn.close()
     return redirect(url_for('index'))
@@ -3446,9 +3468,15 @@ def registrar_saida():
     guia = f"SAI-{datetime.now().year}-{len(c.execute('SELECT id FROM movimentos').fetchall())+1:04d}"
     status_movimento = "PENDENTE_RECEPCAO" if setor_destino_id else "Entregue"
     
-    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, estado_rastreio) 
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia, "SAIDA", request.form['equipamento'], origem_destino, request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), status_movimento, None, request.form['numero_serie'], request.form.get('marca',''), entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), str(qty_to_remove), setor_origem_id, setor_destino_id, estado_saida))
+    departamento_raw = request.form.get('departamento_responsavel_id', '').strip()
+    try:
+        departamento_responsavel_id = int(departamento_raw) if departamento_raw else (session.get('setor_id') or setor_origem_id)
+    except (TypeError, ValueError):
+        departamento_responsavel_id = session.get('setor_id') or setor_origem_id
+    
+    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, estado_rastreio, departamento_responsavel_id) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
+              (guia, "SAIDA", request.form['equipamento'], origem_destino, request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), status_movimento, None, request.form['numero_serie'], request.form.get('marca',''), entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), request.form.get('fornecedor', 'N/A'), str(qty_to_remove), setor_origem_id, setor_destino_id, estado_saida, departamento_responsavel_id))
     conn.commit()
     conn.close()
     flash("Saída registada com sucesso!")
@@ -3495,10 +3523,16 @@ def registrar_saida_reparacao(original_guia):
             quantidade_txt = '1'
     
     agente_protecao = request.form.get('agente_protecao', '')
+
+    dep_repar_raw = request.form.get('departamento_responsavel_id', '').strip()
+    try:
+        dep_repar = int(dep_repar_raw) if dep_repar_raw else (session.get('setor_id'))
+    except (TypeError, ValueError):
+        dep_repar = session.get('setor_id')
     
-    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, estado_rastreio) 
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia_saida, "SAIDA", equipamento, destino, motivo, datetime.now().strftime("%Y-%m-%d"), "Entregue", None, numero_serie, marca, entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), agente_protecao, fornecedor, quantidade_txt, session.get('setor_id'), None, 'EM_ESTOQUE'))
+    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, estado_rastreio, departamento_responsavel_id) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
+              (guia_saida, "SAIDA", equipamento, destino, motivo, datetime.now().strftime("%Y-%m-%d"), "Entregue", None, numero_serie, marca, entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), agente_protecao, fornecedor, quantidade_txt, session.get('setor_id'), None, 'EM_ESTOQUE', dep_repar))
               
     novo_status = request.form.get('novo_status', 'Reparado e Entregue')
     c.execute("UPDATE movimentos SET status=? WHERE guia=?", (novo_status, original_guia))
@@ -4046,7 +4080,71 @@ def ver_guia(guia):
     c.execute("SELECT id, nome FROM setores")
     setor_map = {int(s[0]): s[1] for s in c.fetchall()}
     conn.close()
-    
+
+    # Nome canónico por TEXTO do setor (os ids de setor divergem entre local e nuvem,
+    # por isso mapeamos por palavras-chave do nome, que é estável).
+    def nome_canonico_setor(nome_cru):
+        if not nome_cru:
+            return None
+        n = str(nome_cru).upper().replace('Ç', 'C').replace('Ã', 'A').replace('É', 'E').replace('Í', 'I').replace('Ó', 'O').replace('Ú', 'U')
+        def contem(*palavras):
+            return all(p in n for p in palavras)
+        if contem('DELIMITA') or contem('GEO') and contem('INFORMATICA'):
+            return "Departamento de Delimitação Geográfica, Estatística e Informática"
+        if 'PATRIMONIO' in n:
+            return "Departamento de Património e Aprovisionamento"
+        if 'RECURSOS HUMANOS' in n:
+            return "Departamento de Recursos Humanos"
+        if 'FINANC' in n:
+            return "Departamento das Finanças"
+        if 'AQUISI' in n:
+            return "Departamento das Aquisições"
+        if 'TRANSPORTES' in n and 'REPART' in n:
+            return "Repartição dos Transportes"
+        if 'TRANSPORTE' in n:
+            return "Departamento dos Transportes"
+        if 'PROTEC' in n:
+            return "Departamento de Protecção"
+        if 'RECENSEAMENTO' in n or 'SUFRAGIO' in n:
+            return "Departamento de Recenseamento e Sufrágio"
+        if 'OPERACOES ELEITORAIS' in n or n == 'DOOE':
+            return "Direcção de Organização e Operações Eleitorais (DOOE)"
+        if 'UGEA' in n:
+            return "Unidade Gestora Executora de Aquisições"
+        if 'GABINETE' in n and 'JURIDICO' in n:
+            return "Gabinete Jurídico"
+        if 'GABINETE' in n:
+            return "Gabinete de Comunicação e Imagem"
+        if 'SECRETARIA' in n:
+            return "Secretaria Geral"
+        return None
+
+    def resolver_nome(dep_id):
+        if not dep_id:
+            return None
+        try:
+            dep_id = int(dep_id)
+        except (TypeError, ValueError):
+            return None
+        if dep_id in setor_map:
+            canon = nome_canonico_setor(setor_map[dep_id])
+            if canon:
+                return canon
+            return setor_map[dep_id].title()
+        return None
+
+    def nome_departamento_responsavel():
+        nome = resolver_nome(r.get('departamento_responsavel_id'))
+        if nome:
+            return nome
+        # Fallback: departamento do movimento (origem/destino)
+        nome = resolver_nome(r.get('setor_origem_id')) or resolver_nome(r.get('setor_destino_id'))
+        if nome:
+            return nome
+        return "Departamento de Delimitação Geográfica, Estatística e Informática"
+
+    dep_responsavel = nome_departamento_responsavel()
+
     buffer = io.BytesIO()
     c_pdf = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
@@ -4061,7 +4159,8 @@ def ver_guia(guia):
     c_pdf.drawCentredString(width/2, y, "REPÚBLICA DE MOÇAMBIQUE")
     c_pdf.drawCentredString(width/2, y-12, "STAE-Secretariado Técnico de Administração Eleitoral")
     c_pdf.drawCentredString(width/2, y-24, "DIREÇÃO DE ORGANIZAÇÃO E OPERAÇÕES ELEITORAIS (DOOE)")
-    c_pdf.drawCentredString(width/2, y-36, "DEPARTAMENTO DE DELIMITAÇÃO GEOGRÁFICA ESTATÍSTICA E INFORMÁTICA")
+    c_pdf.setFont("Helvetica-Bold", 9.5)
+    c_pdf.drawCentredString(width/2, y-36, dep_responsavel.upper())
     
     c_pdf.setFont("Helvetica-Bold", 12)
     c_pdf.drawCentredString(width/2, y-66, "Ficha de Controlo")
@@ -4163,7 +4262,7 @@ def ver_guia(guia):
     c_pdf.setFont("Helvetica", 9)
     c_pdf.drawCentredString(150, y_box2 - 15, "Data ____/____/202__")
     c_pdf.drawCentredString(150, y_box2 - 45, "_______________________________")
-    c_pdf.drawCentredString(150, y_box2 - 55, "O Chefe de Departamento de Informática")
+    c_pdf.drawCentredString(150, y_box2 - 55, f"O Chefe de {dep_responsavel}")
     
     c_pdf.drawCentredString(400, y_box2 - 15, "Data ____/____/202__")
     if agente and agente != 'None' and str(agente).strip() != '':
@@ -5105,9 +5204,14 @@ def registrar_saida_inventario(item_id):
     c.execute("UPDATE inventario_local SET quantidade=?, status=? WHERE id=?", (new_qty, new_status, item_id))
     
     guia_saida = f"SAI-{datetime.now().year}-{len(c.execute('SELECT id FROM movimentos').fetchall())+1:04d}"
-    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade) 
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia_saida, "SAIDA", item['equipamento'], request.form.get('destino'), request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), "Entregue", None, item['numero_serie'], item['marca'], request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), 'N/A', str(qty_to_remove)))
+    dep_inv_raw = request.form.get('departamento_responsavel_id', '').strip()
+    try:
+        dep_inv = int(dep_inv_raw) if dep_inv_raw else (session.get('setor_id'))
+    except (TypeError, ValueError):
+        dep_inv = session.get('setor_id')
+    c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, departamento_responsavel_id) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
+              (guia_saida, "SAIDA", item['equipamento'], request.form.get('destino'), request.form.get('motivo',''), datetime.now().strftime("%Y-%m-%d"), "Entregue", None, item['numero_serie'], item['marca'], request.form.get('entregue_por',''), request.form.get('recebido_por',''), session.get('nome_completo', session.get('username', 'tecnico')), request.form.get('agente_protecao',''), 'N/A', str(qty_to_remove), dep_inv))
               
     conn.commit()
     conn.close()
@@ -5321,6 +5425,7 @@ def init_pg_db():
             c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS locais_acesso VARCHAR")
             c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS setor_origem_id INTEGER")
             c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS setor_destino_id INTEGER")
+            c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS departamento_responsavel_id INTEGER")
         except Exception as ex:
             conn.rollback()
             print(f"[-] Erro ao migrar novas colunas de setor no PG: {ex}")

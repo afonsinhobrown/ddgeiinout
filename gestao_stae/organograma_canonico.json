@@ -18,7 +18,7 @@
     },
     {
       "codigo": "DDGEI",
-      "nome": "Departamento de Delimitação, Geografia, Estatística e Informática",
+      "nome": "Departamento de Delimitação Geográfica, Estatística e Informática",
       "tipo": "DEPARTAMENTO_NACIONAL",
       "parent": "DOOE",
       "setores_ddgeiinout": [3, 15]
