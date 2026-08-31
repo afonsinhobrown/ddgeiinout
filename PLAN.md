@@ -29,6 +29,12 @@
 
 **Nota Neon:** erros de concorrência de fundo na sincronização bidirecional ("database is locked", "deadlock detected", FK `eleitoral_tipo_material_categoria_id_fkey`) são pré-existentes e não afetam SQLite nem as rotas (validadas 200 em local+cloud).
 
+**Fix: somas inconsistentes `total ≠ bom + mau` no módulo eleitoral:** o utilizador reportou que no mapa/modal e em todas as somas da gestão eleitoral os valores não batiam (ex: total 3999.99 mas bom 4773.07 + mau 960 = 5733.07). Causa: **90/135** registos em `eleitoral_material_sobrante` tinham `quantidade_total` gravado independentemente de `bom`+`mau` (input de "Qtd Total" livre no registo/edição/importação). Correção:
+1. **Dados corrigidos** em SQLite local (89) e PG cloud (90): `UPDATE ... SET quantidade_total = COALESCE(quantidade_bom,0)+COALESCE(quantidade_mau,0)`. Backup criado: `eleitoral_material_sobrante_backup_20260831` (ambos motores).
+2. **Código** (`routes_eleitoral.py`): `registar_material`, `editar_material` e `importacao_excel` agora calculam `quantidade_total = bom + mau` (ignoram o valor de total submetido), garantindo consistência futura.
+3. **UI** (`material.html`): campo "Qtd Total" passou a **só-leitura** e auto-soma (Bom+Mau) nos modais de criar e editar; `abrirModalEditar` recalcula.
+- Verificado: após correção, as 11 províncias do mapa têm `bom+mau=total` (ex: Nampula 4773.07+960=5733.07); teste de registo com total errado grava `total=bom+mau`.
+
 ---
 
 ## 3.1 Estado — sessão 2026-08-31 (commitado/push)

@@ -393,9 +393,9 @@ def registar_material():
         processo_id = request.form.get('processo_id')
         local_id = request.form.get('local_id')
         tipo_material_id = request.form.get('tipo_material_id')
-        qtd_total = float(request.form.get('quantidade_total', 0) or 0)
         qtd_bom = float(request.form.get('quantidade_bom', 0) or 0)
         qtd_mau = float(request.form.get('quantidade_mau', 0) or 0)
+        qtd_total = qtd_bom + qtd_mau
         observacoes = request.form.get('observacoes', '')
         utilizador_id = session.get('user_id', 1)
 
@@ -462,9 +462,9 @@ def editar_material(id):
                 return redirect(url_for('eleitoral.material'))
 
         from flask import request, flash, redirect, url_for
-        qtd_total = request.form.get('quantidade_total', 0)
-        qtd_bom = request.form.get('quantidade_bom', 0)
-        qtd_mau = request.form.get('quantidade_mau', 0)
+        qtd_bom = float(request.form.get('quantidade_bom', 0) or 0)
+        qtd_mau = float(request.form.get('quantidade_mau', 0) or 0)
+        qtd_total = qtd_bom + qtd_mau
         param_marker = "%s" if is_pg else "?"
         c.execute(f"UPDATE eleitoral_material_sobrante SET quantidade_total = {param_marker}, quantidade_bom = {param_marker}, quantidade_mau = {param_marker} WHERE id = {param_marker}", (qtd_total, qtd_bom, qtd_mau, id))
         conn.commit()
@@ -693,6 +693,8 @@ def importacao_excel():
                 except: bom = 0
                 try: mau = int(row[col_mau]) if len(row) > col_mau and row[col_mau] else 0
                 except: mau = 0
+                # Garante a consistência: total = bom + mau
+                tot = bom + mau
                 
                 # Match local
                 local_id = locais_map.get(prov.lower())
