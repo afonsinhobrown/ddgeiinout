@@ -8,6 +8,12 @@
 
 ## 3.1 Estado — sessão 2026-08-31 (commitado/push)
 
+**Novas funcionalidades — mapa em texto + relatórios PDF com vários critérios (`8fdd141`):**
+- **Mapa (dashboard eleitoral):** ao **clicar** numa província abre um **modal** com o resumo em texto (Total/Bom/Mau) + tabela detalhada por tipo de material e local. Novo endpoint `api_mapa_provincia` (`routes_eleitoral.py`) devolve o detalhe filtrado pelo processo ativo. Tooltip mantido ao passar o rato.
+- **Relatórios eleitoral (`/eleitoral/relatorios`):** filtros agora permitem **vários critérios** — processo + múltiplos tipos de material + múltiplas **categorias** + múltiplos **locais** de armazenamento. Novo **PDF server-side** (`/eleitoral/relatorios/exportar_pdf`, ReportLab, landscape) e **Excel** (`exportar_excel`) com todos os critérios aplicados.
+- **Relatórios sistema principal (`/relatorios`):** filtros convertidos para **seleção múltipla** (setor, marca, tipo equipamento, status, tipo movimento — Ctrl+clique). Novo **PDF server-side** (`/relatorios/export/pdf`, ReportLab) e **Excel** (`/relatorios/export/excel`) que respeitam todos os critérios combinados.
+- Verificado em **modo local (SQLite)** e **modo nuvem (PG)**: páginas 200 e exports PDF/Excel 200 em ambos os módulos.
+
 **Fix produção — `/relatorios` 500 em Vercel (Neon):** a página dava `Internal Server Error`. Causa: agregação `CAST(quantidade AS INTEGER)` falhava no PostgreSQL porque a tabela PG `movimentos` tinha **3 linhas com `quantidade = 'None'`** (string literal, não NULL) — SQLite tolera o cast mas PG lança `invalid input syntax for type integer: "None"`. Corrigido em `7e584df`:
 - **Dados:** limpas as 3 linhas em Neon (`quantidade='None'` → `NULL`).
 - **Causa raiz:** rota de saída de stock (`app.py:3486`) inseria o valor bruto do form em `quantidade`, que podia ser a string `'None'`; agora normaliza para inteiro seguro antes do INSERT (fallback `'1'`).
