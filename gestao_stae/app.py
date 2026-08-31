@@ -3484,12 +3484,19 @@ def registrar_saida_reparacao(original_guia):
     motivo = request.form.get('motivo', '')
     fornecedor = request.form.get('fornecedor', 'N/A')
     quantidade = request.form.get('quantidade', '1')
+    if quantidade in (None, '', 'None') or str(quantidade).strip() == '':
+        quantidade_txt = '1'
+    else:
+        try:
+            quantidade_txt = str(int(quantidade))
+        except (ValueError, TypeError):
+            quantidade_txt = '1'
     
     agente_protecao = request.form.get('agente_protecao', '')
     
     c.execute('''INSERT INTO movimentos (guia, tipo, equipamento, origem_destino, motivo, data, status, funcionario_id, numero_serie, marca, entregue_por, recebido_por, tecnico, agente_protecao, fornecedor, quantidade, setor_origem_id, setor_destino_id, estado_rastreio) 
                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (guia_saida, "SAIDA", equipamento, destino, motivo, datetime.now().strftime("%Y-%m-%d"), "Entregue", None, numero_serie, marca, entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), agente_protecao, fornecedor, quantidade, session.get('setor_id'), None, 'EM_ESTOQUE'))
+              (guia_saida, "SAIDA", equipamento, destino, motivo, datetime.now().strftime("%Y-%m-%d"), "Entregue", None, numero_serie, marca, entregue_por, recebido_por, session.get('nome_completo', session.get('username', 'tecnico')), agente_protecao, fornecedor, quantidade_txt, session.get('setor_id'), None, 'EM_ESTOQUE'))
               
     novo_status = request.form.get('novo_status', 'Reparado e Entregue')
     c.execute("UPDATE movimentos SET status=? WHERE guia=?", (novo_status, original_guia))
