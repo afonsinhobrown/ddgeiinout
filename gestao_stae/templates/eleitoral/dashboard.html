@@ -56,37 +56,16 @@
 
 <div class="card" style="margin-top: 1rem; position: relative;">
     <h3>Distribuição por Província (Mapa de Moçambique)</h3>
-    <p style="font-size:0.9rem; color:#64748b; margin-top:-0.5rem;">Passe o rato sobre cada província para ver o material alocado. A cor indica a quantidade relativa.</p>
+    <p style="font-size:0.9rem; color:#64748b; margin-top:-0.5rem;">Passe o rato sobre cada província para ver o material alocado. A cor indica a quantidade relativa. Fonte do mapa: SimpleMaps.com (CC BY).</p>
+    <p id="mapaCarga" style="font-size:0.85rem; color:#94a3b8;">A carregar mapa...</p>
     
     <div style="text-align:center; overflow-x:auto;">
-        <svg id="mozMapSVG" viewBox="0 0 420 620" style="max-width:520px; width:100%; height:auto;">
-            <!-- Niassa -->
-            <path id="prov_Niassa" data-prov="Niassa" d="M80,20 L240,20 L255,120 L150,150 L110,200 L60,180 L40,100 Z" />
-            <!-- Cabo Delgado -->
-            <path id="prov_Cabo Delgado" data-prov="Cabo Delgado" d="M255,120 L395,120 L385,260 L300,250 L255,180 Z" />
-            <!-- Nampula -->
-            <path id="prov_Nampula" data-prov="Nampula" d="M170,270 L255,180 L300,250 L300,360 L230,380 L170,340 Z" />
-            <!-- Tete -->
-            <path id="prov_Tete" data-prov="Tete" d="M40,200 L60,180 L110,200 L150,150 L150,330 L90,380 L20,340 Z" />
-            <!-- Zambezia -->
-            <path id="prov_Zambezia" data-prov="Zambezia" d="M170,340 L230,380 L300,360 L300,470 L210,480 L170,430 Z" />
-            <!-- Manica -->
-            <path id="prov_Manica" data-prov="Manica" d="M150,330 L170,340 L170,430 L210,480 L240,510 L150,500 L90,420 Z" />
-            <!-- Sofala -->
-            <path id="prov_Sofala" data-prov="Sofala" d="M150,500 L240,510 L250,560 L190,580 L120,550 Z" />
-            <!-- Inhambane -->
-            <path id="prov_Inhambane" data-prov="Inhambane" d="M120,600 L205,590 L240,600 L235,520 L165,540 Z" />
-            <!-- Gaza -->
-            <path id="prov_Gaza" data-prov="Gaza" d="M250,600 L330,605 L380,620 L360,540 L280,520 Z" />
-            <!-- Maputo Provincia -->
-            <path id="prov_Maputo" data-prov="Maputo" d="M330,605 L380,620 L405,590 L360,540 Z" />
-            <!-- Cidade de Maputo -->
-            <path id="prov_Cidade de Maputo" data-prov="Cidade de Maputo" d="M230,600 L255,592 L252,585 L240,580 Z" />
-        </svg>
+        <div id="mozMapSVG" style="max-width:420px; width:100%; margin:0 auto;"></div>
     </div>
 
-    <div style="margin-top:1rem; display:flex; gap:0.5rem; align-items:center; font-size:0.85rem; color:#475569;">
-        <span style="display:inline-block; width:16px; height:16px; background:#fee2e2; border-radius:3px;"></span> Baixo
+    <div style="margin-top:1rem; display:flex; gap:0.5rem; align-items:center; font-size:0.85rem; color:#475569; flex-wrap:wrap;">
+        <span style="display:inline-block; width:16px; height:16px; background:#e2e8f0; border-radius:3px;"></span> Sem dados
+        <span style="display:inline-block; width:16px; height:16px; background:#fecaca; border-radius:3px;"></span> Baixo
         <span style="display:inline-block; width:16px; height:16px; background:#fde68a; border-radius:3px;"></span> Médio
         <span style="display:inline-block; width:16px; height:16px; background:#86efac; border-radius:3px;"></span> Alto
         <span style="display:inline-block; width:16px; height:16px; background:#166534; border-radius:3px;"></span> Muito Alto
@@ -101,24 +80,24 @@
 </div>
 
 <style>
-    #mozMapSVG path {
-        fill: #e2e8f0;
+    #mozMapSVG svg { width: 100%; height: auto; }
+    #mozMapSVG path.prov {
         stroke: #334155;
-        stroke-width: 1.5;
+        stroke-width: 0.8;
         stroke-linejoin: round;
         cursor: pointer;
-        transition: fill 0.15s, filter 0.15s;
+        transition: filter 0.15s;
     }
-    #mozMapSVG path:hover {
-        filter: brightness(1.1);
-        stroke-width: 2.5;
+    #mozMapSVG path.prov.nivel-0 { fill: #e2e8f0; }
+    #mozMapSVG path.prov.nivel-1 { fill: #fecaca; }
+    #mozMapSVG path.prov.nivel-2 { fill: #fde68a; }
+    #mozMapSVG path.prov.nivel-3 { fill: #86efac; }
+    #mozMapSVG path.prov.nivel-4 { fill: #166534; }
+    #mozMapSVG path.prov:hover {
+        filter: brightness(1.15);
+        stroke-width: 1.5;
         stroke: #1d4ed8;
     }
-    #mozMapSVG path.nivel-0 { fill: #e2e8f0; }
-    #mozMapSVG path.nivel-1 { fill: #fee2e2; }
-    #mozMapSVG path.nivel-2 { fill: #fde68a; }
-    #mozMapSVG path.nivel-3 { fill: #86efac; }
-    #mozMapSVG path.nivel-4 { fill: #166534; }
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -176,66 +155,79 @@
     fetch('{{ url_for("eleitoral.api_mapa_distribuicao") }}')
     .then(res => res.json())
     .then(data => {
-        const tooltip = document.getElementById('mapTooltip');
-        const ttProvName = document.getElementById('ttProvName');
-        const ttContent = document.getElementById('ttContent');
+        // Primeiro carrega o SVG real do mapa
+        fetch('{{ url_for("static", filename="mozambique.svg") }}')
+        .then(r => r.text())
+        .then(svg => {
+            document.getElementById('mozMapSVG').innerHTML = svg;
+            document.getElementById('mapaCarga').style.display = 'none';
 
-        // Normaliza nomes de província (BD -> mapa)
-        const norm = {
-            'Niassa': 'Niassa',
-            'Cabo Delgado': 'Cabo Delgado',
-            'Nampula': 'Nampula',
-            'Tete': 'Tete',
-            'Zambézia': 'Zambezia', 'Zambezia': 'Zambezia',
-            'Manica': 'Manica',
-            'Sofala': 'Sofala',
-            'Inhambane': 'Inhambane',
-            'Gaza': 'Gaza',
-            'Cidade de Maputo': 'Cidade de Maputo',
-            'Maputo': 'Maputo'
-        };
+            const tooltip = document.getElementById('mapTooltip');
+            const ttProvName = document.getElementById('ttProvName');
+            const ttContent = document.getElementById('ttContent');
 
-        // Calcula intervalos para o heatmap
-        const totais = Object.values(data).map(d => Number(d.total) || 0);
-        const maxT = Math.max(...totais, 1);
-        const partes = maxT / 4;
+            // Normaliza nomes da BD -> nomes no SVG
+            const norm = {
+                'Cidade de Maputo': 'Maputo City',
+                'Maputo': 'Maputo',
+                'Zambézia': 'Zambezia', 'Zambezia': 'Zambezia',
+                'Cabo Delgado': 'Cabo Delgado',
+                'Niassa': 'Niassa',
+                'Nampula': 'Nampula',
+                'Tete': 'Tete',
+                'Manica': 'Manica',
+                'Sofala': 'Sofala',
+                'Inhambane': 'Inhambane',
+                'Gaza': 'Gaza'
+            };
 
-        document.querySelectorAll('#mozMapSVG path[data-prov]').forEach(el => {
-            const provNode = el.getAttribute('data-prov');
-            const provData = data[provNode] || data[norm[provNode]];
+            // Calcula intervalos para o heatmap
+            const totais = Object.values(data).map(d => Number(d.total) || 0);
+            const maxT = Math.max(...totais, 1);
+            const partes = maxT / 4;
 
-            if (provData && (Number(provData.total) || 0) > 0) {
-                const total = Number(provData.total) || 0;
-                let nivel = 1;
-                if (total > partes * 3) nivel = 4;
-                else if (total > partes * 2) nivel = 3;
-                else if (total > partes) nivel = 2;
-                el.classList.add('nivel-' + nivel);
-            } else {
-                el.classList.add('nivel-0');
-            }
+            document.querySelectorAll('#mozMapSVG path.prov[data-prov]').forEach(el => {
+                const provNode = el.getAttribute('data-prov');
+                const chave = norm[provNode] || provNode;
+                const provData = data[chave] !== undefined ? data[chave]
+                    : (data[provNode] !== undefined ? data[provNode] : null);
 
-            el.addEventListener('mousemove', (e) => {
-                tooltip.style.display = 'block';
-                tooltip.style.left = (e.pageX + 15) + 'px';
-                tooltip.style.top = (e.pageY + 15) + 'px';
-                ttProvName.innerText = provNode;
-
-                let html = '<table style="width:100%;">';
                 if (provData && (Number(provData.total) || 0) > 0) {
-                    html += `<tr><td>Total</td><td style="text-align:right; font-weight:bold; padding-left:1rem;">${Number(provData.total)||0}</td></tr>`;
-                    html += `<tr><td>Bom</td><td style="text-align:right; font-weight:bold; padding-left:1rem; color:#16a34a;">${Number(provData.bom)||0}</td></tr>`;
-                    html += `<tr><td>Mau</td><td style="text-align:right; font-weight:bold; padding-left:1rem; color:#dc2626;">${Number(provData.mau)||0}</td></tr>`;
+                    const total = Number(provData.total) || 0;
+                    let nivel = 1;
+                    if (total > partes * 3) nivel = 4;
+                    else if (total > partes * 2) nivel = 3;
+                    else if (total > partes) nivel = 2;
+                    el.classList.add('nivel-' + nivel);
                 } else {
-                    html += '<tr><td style="color:#94a3b8;">Sem material alocado</td></tr>';
+                    el.classList.add('nivel-0');
                 }
-                html += '</table>';
-                ttContent.innerHTML = html;
-            });
 
-            el.addEventListener('mouseout', () => {
-                tooltip.style.display = 'none';
+                el.addEventListener('mousemove', (e) => {
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = (e.pageX + 15) + 'px';
+                    tooltip.style.top = (e.pageY + 15) + 'px';
+                    ttProvName.innerText = chave;
+
+                    let html = '<table style="width:100%;">';
+                    if (provData && (Number(provData.total) || 0) > 0) {
+                        html += `<tr><td>Total</td><td style="text-align:right; font-weight:bold; padding-left:1rem;">${Number(provData.total)||0}</td></tr>`;
+                        html += `<tr><td>Bom</td><td style="text-align:right; font-weight:bold; padding-left:1rem; color:#16a34a;">${Number(provData.bom)||0}</td></tr>`;
+                        html += `<tr><td>Mau</td><td style="text-align:right; font-weight:bold; padding-left:1rem; color:#dc2626;">${Number(provData.mau)||0}</td></tr>`;
+                    } else {
+                        html += '<tr><td style="color:#94a3b8;">Sem material alocado</td></tr>';
+                    }
+                    html += '</table>';
+                    ttContent.innerHTML = html;
+                });
+
+                el.addEventListener('mouseout', () => {
+                    tooltip.style.display = 'none';
+                });
             });
+        })
+        .catch(() => {
+            document.getElementById('mapaCarga').innerText = 'Não foi possível carregar o mapa.';
         });
     });
 
