@@ -182,7 +182,7 @@
     .then(res => res.json())
     .then(data => {
         // Primeiro carrega o SVG real do mapa
-        fetch('{{ url_for("static", filename="mozambique.svg") }}')
+        fetch('/mapa_mozambique.svg')
         .then(r => r.text())
         .then(svg => {
             document.getElementById('mozMapSVG').innerHTML = svg;

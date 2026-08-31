@@ -5608,6 +5608,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from routes_eleitoral import eleitoral_bp
 app.register_blueprint(eleitoral_bp)
 
+@app.route('/mapa_mozambique.svg')
+def mapa_mozambique():
+    caminho = os.path.join(BASE_DIR, 'static', 'mozambique.svg')
+    if os.path.exists(caminho):
+        return send_file(caminho, mimetype='image/svg+xml')
+    return "Mapa não encontrado", 404
+
 if __name__ == '__main__':
     # Executa a sincronização inteligente apenas se estiver em modo local
     if not is_cloud_mode():
