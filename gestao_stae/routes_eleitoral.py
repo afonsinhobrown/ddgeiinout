@@ -1141,7 +1141,7 @@ def exportar_pdf():
             desc_processo = f"{pr['nome' if is_pg else 'nome']} ({pr['ano' if is_pg else 'ano']})"
 
     # Totais globais
-    c.execute(f"SELECT COALESCE(SUM(quantidade_total),0) as t, COALESCE(SUM(quantidade_bom),0) as b, COALESCE(SUM(quantidade_mau),0) as m FROM eleitoral_material_sobrante s {cond_proc}", param)
+    c.execute(f"SELECT COALESCE(SUM(quantidade_total),0) as t, COALESCE(SUM(quantidade_bom),0) as b, COALESCE(SUM(quantidade_mau),0) as m FROM eleitoral_material_sobrante s JOIN eleitoral_tipo_material t ON s.tipo_material_id = t.id {cond_proc}", param)
     row = c.fetchone()
     totais = {
         'total': row['t' if is_pg else 't'] or 0,
