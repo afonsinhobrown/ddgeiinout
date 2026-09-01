@@ -2,7 +2,13 @@
 
 > **Documento de continuidade.** Qualquer agente/sessão que retomar este projeto DEVE ler este ficheiro primeiro. Atualizar sempre que concluir ou iniciar trabalho. Registar aqui o estado real, decisões e pendências — nunca depender de stash/commits para comunicação.
 
-Última atualização: 2026-08-31
+Última atualização: 2026-09-01
+
+---
+
+## 3.1 Estado — sessão 2026-09-01
+
+**Fix: `/eleitoral/relatorios` 500 Internal Server Error em modo SQLite/PG (`[FIX]`):** a query "Totais Globais" (`routes_eleitoral.py:1335`) usava `cond_proc` que incluía `t.categoria_id IN (?)`, mas a query só selecionava de `eleitoral_material_sobrante s` sem fazer JOIN com `eleitoral_tipo_material` (alias `t`). As outras três queries (Por Categoria, Por Tipo, Por Local) já tinham o JOIN. Corrigido adicionando `JOIN eleitoral_tipo_material t ON s.tipo_material_id = t.id` à query dos Totais Globais. Verificado: `/eleitoral/relatorios?processo_id=&tipo_material_id=24&categoria_id=6&local_id=4` agora retorna 200.
 
 ---
 

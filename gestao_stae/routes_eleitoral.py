@@ -1332,7 +1332,7 @@ def relatorios():
     param = tuple(params)
         
     # Totais Globais
-    c.execute(f"SELECT SUM(quantidade_total) as t, SUM(quantidade_bom) as b, SUM(quantidade_mau) as m FROM eleitoral_material_sobrante s {cond_proc}", param)
+    c.execute(f"SELECT SUM(quantidade_total) as t, SUM(quantidade_bom) as b, SUM(quantidade_mau) as m FROM eleitoral_material_sobrante s JOIN eleitoral_tipo_material t ON s.tipo_material_id = t.id {cond_proc}", param)
     row = c.fetchone()
     if not is_pg and row:
         row = dict(row)
