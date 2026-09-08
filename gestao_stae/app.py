@@ -456,6 +456,16 @@ COMMON_HEAD = '''
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Ctext%20y='.9em'%20font-size='90'%3E%F0%9F%93%A6%3C/text%3E%3C/svg%3E">
+    <script>
+        (function () {
+            var h = window.location.hostname;
+            var isProd = h !== 'localhost' && h !== '127.0.0.1';
+            if (isProd) {
+                var noop = function () {};
+                console.log = console.warn = console.error = console.info = console.debug = console.trace = noop;
+            }
+        })();
+    </script>
     <style>
         :root { --primary: #1e293b; --accent: #10b981; --bg: #f8fafc; --border: #e2e8f0; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
