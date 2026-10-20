@@ -3070,7 +3070,14 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
 def auth():
     if request.path.startswith('/static'): return
     if request.path == '/login': return
+    if request.path == '/favicon.ico': return
     if 'username' not in session: return redirect(url_for('login'))
+
+@app.route('/favicon.ico')
+def favicon_ico():
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+           '<text y=".9em" font-size="90">&#128230;</text></svg>')
+    return svg, 200, {'Content-Type': 'image/svg+xml'}
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -3130,7 +3137,7 @@ def logout():
 
 @app.before_request
 def check_permissions():
-    if request.endpoint in ('login', 'static', 'api_sync') or request.endpoint is None:
+    if request.endpoint in ('login', 'static', 'api_sync', 'favicon_ico') or request.endpoint is None:
         return
         
     if 'username' not in session:
@@ -5236,7 +5243,7 @@ def inventario():
                         i.quilometragem, i.estado_conservacao, i.concurso, i.entidade_externa, i.dados_completos
                  FROM inventario_local i 
                  LEFT JOIN setores s ON i.setor_id = s.id 
-                 LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
+                 LEFT JOIN eleitoral_provincia p ON CAST(NULLIF(i.provincia_id, '') AS INTEGER) = p.id
                  WHERE i.status != 'Pendente'{where_setor}{cond_tipo}
                  ORDER BY i.id DESC''', params)
 
@@ -5254,7 +5261,7 @@ def inventario():
                         i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome
                  FROM inventario_local i 
                  LEFT JOIN setores s ON i.setor_id = s.id 
-                 LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
+                 LEFT JOIN eleitoral_provincia p ON CAST(NULLIF(i.provincia_id, '') AS INTEGER) = p.id
                  WHERE i.status = 'Pendente'{where_setor}{cond_tipo}
                  ORDER BY i.id DESC''', params)
     cols_p = [d[0] for d in c.description]
@@ -5264,7 +5271,7 @@ def inventario():
     c.execute(f'''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, i.guia_origem,
                         i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_destino_nome
                  FROM inventario_local i 
-                 LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
+                 LEFT JOIN eleitoral_provincia p ON CAST(NULLIF(i.provincia_id, '') AS INTEGER) = p.id
                  WHERE i.status = 'Pendente' AND i.provincia_id IS NOT NULL{cond_tipo}
                  ORDER BY i.id DESC''')
     cols_pp = [d[0] for d in c.description]
