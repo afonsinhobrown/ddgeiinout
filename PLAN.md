@@ -8,6 +8,8 @@
 
 ## 3.1 Estado — sessão 2026-10-20
 
+**Feat: Configurações organizadas em abas (`CADASTROS_TEMPLATE`):** a página `/cadastros` deixou de mostrar todas as listas numa grelha única. Agora tem abas — **Conta, Setores, Funcionários, Usuários, Marcas, Tipos, Motivos, Fornecedores, Instituições** — com contagem por aba. Cada lista tem área com scroll (`max-height:420px`, `overflow-y:auto`) e **paginação de 10 registos** no cliente (Anterior/Próximo + contador). A aba ativa é guardada em `sessionStorage` e no hash (`#funcionarios`), mantendo-se após adicionar/editar/remover. HTML balanceado e `/cadastros` validado 200.
+
 **Feat: viaturas como bens patrimoniais no inventário (`app.py`):**
 - **Schema (`inventario_local`, SQLite + PG):** novas colunas `tipo_bem` (default `EQUIPAMENTO`), `modelo`, `matricula`, `chassis`, `ano`, `cor`, `tipo_combustivel`, `quilometragem`, `estado_conservacao`, `concurso` (concurso público de aquisição), `entidade_externa`, `dados_completos`. Migração automática em `check_db_integrity` (SQLite) e `init_pg_db` (PG). Tipos "Viatura Ligeira"/"Viatura Pesada" semeados em `tipos_equipamento`.
 - **Cadastro flexível:** o formulário `/inventario` tem "Tipo de Bem" (Equipamento/Viatura). Em modo viatura mostra modelo, matrícula, chassis, ano, cor, combustível, km e estado de conservação.

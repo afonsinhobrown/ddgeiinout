@@ -1544,13 +1544,38 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
 CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<title>Configurações - STAE</title>
 <style>
     .card table td { border-bottom: 1px solid #f1f5f9; padding: 0.5rem 0; }
+    .tabs-bar { display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:1.5rem; background:white; padding:0.6rem; border-radius:0.75rem; border:1px solid var(--border); }
+    .tab-btn { background:#f1f5f9; color:#475569; border:1px solid var(--border); padding:0.5rem 0.9rem; border-radius:0.5rem; cursor:pointer; font-weight:600; font-size:0.85rem; }
+    .tab-btn:hover { background:#e2e8f0; }
+    .tab-btn.active { background:var(--primary); color:white; border-color:var(--primary); }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+    .list-box { max-height:420px; overflow-y:auto; border:1px solid var(--border); border-radius:0.5rem; margin-top:0.5rem; }
+    .list-box table { width:100%; border-collapse:collapse; }
+    .list-box tr:last-child td { border-bottom:none; }
+    .pagination-bar { display:flex; justify-content:space-between; align-items:center; gap:0.75rem; margin-top:0.75rem; font-size:0.85rem; color:#475569; }
+    .pagination-bar button { background:white; border:1px solid var(--border); padding:0.35rem 0.7rem; border-radius:0.375rem; cursor:pointer; font-weight:600; }
+    .pagination-bar button:disabled { opacity:0.5; cursor:not-allowed; }
 </style>
 </head>
 <body>
     <div class="nav"><strong>STAE GESTÃO - CONFIGURAÇÕES</strong><div style="display:flex; align-items:center; gap:1rem;"><button onclick="syncManual()" class="btn btn-outline" style="background:transparent; color:white; border:1px solid rgba(255,255,255,0.3); padding:0.3rem 0.6rem; font-size:0.8rem">🔄 Sincronizar</button><a href="/" style="color:white">⬅️ Voltar ao Início</a></div></div>
     <div class="container">
         {% if msg %}<div style="background:#dcfce3; color:#166534; padding:1rem; border-radius:0.5rem; margin-bottom:1rem;">{{msg}}</div>{% endif %}
-        
+
+        <div class="tabs-bar">
+            <button class="tab-btn active" data-tab="conta" onclick="selectTab('conta')">🔒 Conta</button>
+            <button class="tab-btn" data-tab="setores" onclick="selectTab('setores')">🏢 Setores ({{ setores|length }})</button>
+            <button class="tab-btn" data-tab="funcionarios" onclick="selectTab('funcionarios')">👔 Funcionários ({{ funcionarios|length }})</button>
+            <button class="tab-btn" data-tab="usuarios" onclick="selectTab('usuarios')">👤 Usuários ({{ users_list|length }})</button>
+            <button class="tab-btn" data-tab="marcas" onclick="selectTab('marcas')">🏷️ Marcas ({{ marcas|length }})</button>
+            <button class="tab-btn" data-tab="tipos" onclick="selectTab('tipos')">🖥️ Tipos ({{ tipos|length }})</button>
+            <button class="tab-btn" data-tab="motivos" onclick="selectTab('motivos')">📌 Motivos ({{ motivos|length }})</button>
+            <button class="tab-btn" data-tab="fornecedores" onclick="selectTab('fornecedores')">🚚 Fornecedores ({{ fornecedores|length }})</button>
+            <button class="tab-btn" data-tab="instituicoes" onclick="selectTab('instituicoes')">🏛️ Instituições ({{ instituicoes|length }})</button>
+        </div>
+
+        <div id="tab-conta" class="tab-panel active">
         <div class="card">
             <h3>🔒 Alterar a minha palavra-passe</h3>
             <p style="color:#64748b; font-size:0.9rem; margin-bottom:1rem;">Utilize esta secção para alterar a sua própria palavra-passe de acesso ao sistema.</p>
@@ -1570,8 +1595,9 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                 <button class="btn btn-blue">Alterar Palavra-passe</button>
             </form>
         </div>
-        
-        <div class="form-grid" style="grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 1.5rem;">
+        </div>
+
+        <div id="tab-setores" class="tab-panel">
             <!-- Setores -->
             <div class="card">
                 <h3>Adicionar Setor</h3>
@@ -1580,7 +1606,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                     <button class="btn btn-blue" style="margin-top:1rem; width:100%">Salvar Setor</button>
                 </form>
                 <h4 style="margin-top:2rem">Setores Existentes</h4>
-                <table style="margin-top:0.5rem">
+                <div class="list-box" id="list-setores"><table style="margin-top:0;">
                     {% for s in setores %}
                     <tr>
                         <td style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
@@ -1594,9 +1620,12 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         </td>
                     </tr>
                     {% endfor %}
-                </table>
+                </table></div>
+                <div class="pagination-bar" id="pager-setores"></div>
             </div>
+        </div>
 
+        <div id="tab-funcionarios" class="tab-panel">
             <!-- Funcionários -->
             <div class="card">
                 <h3>Adicionar Funcionário</h3>
@@ -1610,7 +1639,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                     <button class="btn btn-green" style="margin-top:1rem; width:100%">Salvar Funcionário</button>
                 </form>
                 <h4 style="margin-top:2rem">Funcionários Cadastrados</h4>
-                <table style="margin-top:0.5rem">
+                <div class="list-box" id="list-funcionarios"><table style="margin-top:0;">
                     {% for f in funcionarios %}
                     <tr>
                         <td style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
@@ -1627,9 +1656,12 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         </td>
                     </tr>
                     {% endfor %}
-                </table>
+                </table></div>
+                <div class="pagination-bar" id="pager-funcionarios"></div>
             </div>
+        </div>
 
+        <div id="tab-usuarios" class="tab-panel">
             <!-- Usuários -->
             <div class="card">
                 <h3>Adicionar Usuário</h3>
@@ -1674,7 +1706,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                     <button class="btn" style="background:#1e293b; color:white; margin-top:1rem; width:100%">Salvar Usuário</button>
                 </form>
                 <h4 style="margin-top:2rem">Usuários do Sistema</h4>
-                <table style="margin-top:0.5rem">
+                <div class="list-box" id="list-usuarios"><table style="margin-top:0;">
                     {% for u in users_list %}
                     <tr>
                         <td style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
@@ -1692,9 +1724,12 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         </td>
                     </tr>
                     {% endfor %}
-                </table>
+                </table></div>
+                <div class="pagination-bar" id="pager-usuarios"></div>
             </div>
+        </div>
 
+        <div id="tab-marcas" class="tab-panel">
             <!-- Marcas -->
             <div class="card">
                 <h3>Adicionar Marca</h3>
@@ -1703,7 +1738,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                     <button class="btn btn-blue" style="margin-top:1rem; width:100%">Salvar Marca</button>
                 </form>
                 <h4 style="margin-top:2rem">Marcas Cadastradas</h4>
-                <table style="margin-top:0.5rem">
+                <div class="list-box" id="list-marcas"><table style="margin-top:0;">
                     {% for m in marcas %}
                     <tr>
                         <td style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
@@ -1717,9 +1752,12 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         </td>
                     </tr>
                     {% endfor %}
-                </table>
+                </table></div>
+                <div class="pagination-bar" id="pager-marcas"></div>
             </div>
+        </div>
 
+        <div id="tab-tipos" class="tab-panel">
             <!-- Tipos de Equipamento -->
             <div class="card">
                 <h3>Adicionar Tipo de Equip.</h3>
@@ -1728,7 +1766,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                     <button class="btn btn-green" style="margin-top:1rem; width:100%">Salvar Tipo</button>
                 </form>
                 <h4 style="margin-top:2rem">Tipos Cadastrados</h4>
-                <table style="margin-top:0.5rem">
+                <div class="list-box" id="list-tipos"><table style="margin-top:0;">
                     {% for t in tipos %}
                     <tr>
                         <td style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
@@ -1742,9 +1780,12 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         </td>
                     </tr>
                     {% endfor %}
-                </table>
+                </table></div>
+                <div class="pagination-bar" id="pager-tipos"></div>
             </div>
+        </div>
 
+        <div id="tab-motivos" class="tab-panel">
             <!-- Motivos -->
             <div class="card">
                 <h3>Adicionar Motivo</h3>
@@ -1753,7 +1794,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                     <button class="btn btn-blue" style="margin-top:1rem; width:100%">Salvar Motivo</button>
                 </form>
                 <h4 style="margin-top:2rem">Motivos Cadastrados</h4>
-                <table style="margin-top:0.5rem">
+                <div class="list-box" id="list-motivos"><table style="margin-top:0;">
                     {% for m in motivos %}
                     <tr>
                         <td style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
@@ -1767,9 +1808,12 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         </td>
                     </tr>
                     {% endfor %}
-                </table>
+                </table></div>
+                <div class="pagination-bar" id="pager-motivos"></div>
             </div>
+        </div>
 
+        <div id="tab-fornecedores" class="tab-panel">
             <!-- Fornecedores -->
             <div class="card">
                 <h3>Adicionar Fornecedor</h3>
@@ -1778,7 +1822,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                     <button class="btn btn-blue" style="margin-top:1rem; width:100%">Salvar Fornecedor</button>
                 </form>
                 <h4 style="margin-top:2rem">Fornecedores</h4>
-                <table style="margin-top:0.5rem">
+                <div class="list-box" id="list-fornecedores"><table style="margin-top:0;">
                     {% for f in fornecedores %}
                     <tr>
                         <td style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
@@ -1792,9 +1836,12 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         </td>
                     </tr>
                     {% endfor %}
-                </table>
+                </table></div>
+                <div class="pagination-bar" id="pager-fornecedores"></div>
             </div>
+        </div>
 
+        <div id="tab-instituicoes" class="tab-panel">
             <!-- Instituições Externas -->
             <div class="card">
                 <h3>Adicionar Instituição Ext.</h3>
@@ -1803,7 +1850,7 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                     <button class="btn btn-green" style="margin-top:1rem; width:100%">Salvar Instituição</button>
                 </form>
                 <h4 style="margin-top:2rem">Instituições Externas</h4>
-                <table style="margin-top:0.5rem">
+                <div class="list-box" id="list-instituicoes"><table style="margin-top:0;">
                     {% for i in instituicoes %}
                     <tr>
                         <td style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
@@ -1817,7 +1864,8 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
                         </td>
                     </tr>
                     {% endfor %}
-                </table>
+                </table></div>
+                <div class="pagination-bar" id="pager-instituicoes"></div>
             </div>
         </div>
     </div>
@@ -1837,6 +1885,60 @@ CADASTROS_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD +
     </div>
 
     <script>
+        const PAGE_SIZE_CADASTROS = 10;
+
+        function selectTab(name) {
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+            try { sessionStorage.setItem('cadastros_tab', name); } catch (e) {}
+            if (history.replaceState) history.replaceState(null, '', '#' + name);
+        }
+
+        function initPagination(key) {
+            const box = document.getElementById('list-' + key);
+            const pager = document.getElementById('pager-' + key);
+            if (!box || !pager) return;
+            const rows = Array.from(box.querySelectorAll('tr'));
+            if (rows.length === 0) {
+                pager.innerHTML = '<span style="color:#94a3b8;">Sem registos.</span>';
+                return;
+            }
+            const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE_CADASTROS));
+            let page = 1;
+            function render() {
+                rows.forEach((r, i) => {
+                    const visible = i >= (page - 1) * PAGE_SIZE_CADASTROS && i < page * PAGE_SIZE_CADASTROS;
+                    r.style.display = visible ? '' : 'none';
+                });
+                pager.innerHTML = '';
+                const prev = document.createElement('button');
+                prev.textContent = '⬅️ Anterior';
+                prev.disabled = page === 1;
+                prev.onclick = () => { page--; render(); };
+                const info = document.createElement('span');
+                info.textContent = 'Página ' + page + ' de ' + totalPages + ' · ' + rows.length + ' registo(s)';
+                const next = document.createElement('button');
+                next.textContent = 'Próximo ➡️';
+                next.disabled = page === totalPages;
+                next.onclick = () => { page++; render(); };
+                pager.appendChild(prev);
+                pager.appendChild(info);
+                pager.appendChild(next);
+            }
+            render();
+        }
+
+        ['setores', 'funcionarios', 'usuarios', 'marcas', 'tipos', 'motivos', 'fornecedores', 'instituicoes'].forEach(initPagination);
+
+        (function () {
+            let initial = (location.hash || '').replace('#', '');
+            if (!initial) {
+                try { initial = sessionStorage.getItem('cadastros_tab') || ''; } catch (e) {}
+            }
+            if (!initial || !document.getElementById('tab-' + initial)) initial = 'conta';
+            selectTab(initial);
+        })();
+
         function openEdit(action, title, fields) {
             document.getElementById('editForm').action = action;
             document.getElementById('editTitle').innerText = title;
