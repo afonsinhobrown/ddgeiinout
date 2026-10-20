@@ -2,7 +2,24 @@
 
 > **Documento de continuidade.** Qualquer agente/sessão que retomar este projeto DEVE ler este ficheiro primeiro. Atualizar sempre que concluir ou iniciar trabalho. Registar aqui o estado real, decisões e pendências — nunca depender de stash/commits para comunicação.
 
-Última atualização: 2026-09-01
+Última atualização: 2026-10-20
+
+---
+
+## 3.1 Estado — sessão 2026-10-20
+
+**Feat: viaturas como bens patrimoniais no inventário (`app.py`):**
+- **Schema (`inventario_local`, SQLite + PG):** novas colunas `tipo_bem` (default `EQUIPAMENTO`), `modelo`, `matricula`, `chassis`, `ano`, `cor`, `tipo_combustivel`, `quilometragem`, `estado_conservacao`, `concurso` (concurso público de aquisição), `entidade_externa`, `dados_completos`. Migração automática em `check_db_integrity` (SQLite) e `init_pg_db` (PG). Tipos "Viatura Ligeira"/"Viatura Pesada" semeados em `tipos_equipamento`.
+- **Cadastro flexível:** o formulário `/inventario` tem "Tipo de Bem" (Equipamento/Viatura). Em modo viatura mostra modelo, matrícula, chassis, ano, cor, combustível, km e estado de conservação.
+  - Com `quantidade = 1` e dados completos → viatura completa.
+  - Com `quantidade > 1` → cria N linhas individuais com `quantidade=1`, `status='Aguarda Dados'`, `dados_completos=0` (sem dados individuais). O utilizador recebe **sempre** um `confirm()` de aviso antes de submeter e um flash depois.
+  - Com `quantidade = 1` e dados em falta → cria como `Aguarda Dados` e avisa.
+- **Acesso dedicado:** novo botão **🚗 Viaturas** na página inicial → `/inventario?tipo_bem=VIATURA`, que filtra a página (título "INVENTÁRIO DE VIATURAS", estatísticas, pendentes e tabela), mantém o filtro de local e pré-seleciona o modo Viatura no cadastro.
+- **Alerta persistente:** enquanto existirem viaturas incompletas, `/inventario` mostra um painel "⚠ Alerta: N viatura(s) sem dados individuais" com a lista e botão "Completar Dados". O alerta não desaparece até todas estarem completas.
+- **Completar dados:** modal + rota `POST /inventario/viatura/<id>/completar`. Obriga a matrícula, chassis, modelo e estado de conservação; valida matrícula duplicada; ao completar passa `status` de `Aguarda Dados` para `Disponível` e sincroniza `numero_serie = matrícula`.
+- **Bloqueio de movimentação:** `movimentar_multiplos` e `registrar_saida_inventario` validam as viaturas e recusam a operação com a lista de campos em falta. A UI também bloqueia antes de enviar.
+- **Movimentação para entidade externa:** o modal de transferência passou a ter "Tipo de Destino: Setor Interno / Entidade Externa". O destino externo é um campo de **texto livre** (com `datalist` das `instituicoes` já cadastradas), permitindo escrever qualquer nome. Grava `entidade_externa` na linha, `status='Em uso'` e um movimento `TRANSFERENCIA_EXTERNA` (sem criar pendente no destino). O modal inclui **Observações**, gravadas em `movimentos.relatorio` e anexadas às observações do item no destino interno. A localização externa aparece na coluna SETOR. Viaturas incompletas não podem sair para o exterior.
+- **Verificação:** `ast.parse` OK. Teste funcional em cópia da BD SQLite: lote de 3 viaturas criou 3 linhas `Aguarda Dados`; alerta presente na página; movimentação recusada (400); completar 2 viaturas OK; matrícula duplicada rejeitada; transferência interna OK; transferência externa gravou `entidade_externa='Consulado X'` e movimento `TRANSFERENCIA_EXTERNA`. **PG/Neon:** migração adicionada mas não validada nesta sessão.
 
 ---
 

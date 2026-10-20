@@ -265,6 +265,20 @@ def check_db_integrity(c):
         if 'local_uso' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN local_uso TEXT")
         if 'estado' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN estado TEXT")
         if 'guia_origem' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN guia_origem TEXT")
+        if 'tipo_bem' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN tipo_bem TEXT DEFAULT 'EQUIPAMENTO'")
+        if 'modelo' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN modelo TEXT")
+        if 'matricula' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN matricula TEXT")
+        if 'chassis' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN chassis TEXT")
+        if 'ano' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN ano TEXT")
+        if 'cor' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN cor TEXT")
+        if 'tipo_combustivel' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN tipo_combustivel TEXT")
+        if 'quilometragem' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN quilometragem TEXT")
+        if 'estado_conservacao' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN estado_conservacao TEXT")
+        if 'concurso' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN concurso TEXT")
+        if 'entidade_externa' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN entidade_externa TEXT")
+        if 'dados_completos' not in inv_cols: c.execute("ALTER TABLE inventario_local ADD COLUMN dados_completos INTEGER DEFAULT 1")
+        c.execute("INSERT OR IGNORE INTO tipos_equipamento (nome) VALUES ('Viatura Ligeira')")
+        c.execute("INSERT OR IGNORE INTO tipos_equipamento (nome) VALUES ('Viatura Pesada')")
         
         c.execute("PRAGMA table_info(users)")
         u_cols = [row[1] for row in c.fetchall()]
@@ -391,7 +405,19 @@ def init_db():
         local_uso TEXT,
         estado TEXT,
         guia_origem TEXT,
-        setor_id TEXT
+        setor_id TEXT,
+        tipo_bem TEXT DEFAULT 'EQUIPAMENTO',
+        modelo TEXT,
+        matricula TEXT,
+        chassis TEXT,
+        ano TEXT,
+        cor TEXT,
+        tipo_combustivel TEXT,
+        quilometragem TEXT,
+        estado_conservacao TEXT,
+        concurso TEXT,
+        entidade_externa TEXT,
+        dados_completos INTEGER DEFAULT 1
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS equipamento_rastreio (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -749,6 +775,7 @@ MAIN_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD + '''<
             <button onclick="show('ent')" class="btn btn-green">📥 Entrada</button>
             <button onclick="show('sai')" class="btn btn-blue">📤 Saída</button>
             <a href="/inventario" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📦 Inventário</a>
+            <a href="/inventario?tipo_bem=VIATURA" class="btn btn-outline" style="background:#ede9fe; color:#5b21b6; font-weight:bold">🚗 Viaturas</a>
             <a href="/movimentos" class="btn btn-outline" style="background:#e2e8f0; color:#0f172a">📋 Todos os Movimentos</a>
             <button onclick="abrirBuscaBarcode()" class="btn btn-outline" style="background:#f1f5f9; color:#0f172a">🔍 Buscar por Código de Barras</button>
             {% if session.perfil == 'admin' %}
@@ -1891,9 +1918,48 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
     </div>
     <div class="container">
         {% if msg %}<div style="background:#dcfce3; color:#166534; padding:1rem; border-radius:0.5rem; margin-bottom:1rem;">{{msg}}</div>{% endif %}
+
+        {% if viaturas_incompletas %}
+        <div class="card" style="margin-bottom: 2rem; border: 2px solid #f59e0b; background: #fffbeb;">
+            <h3 style="color:#b45309; display:flex; align-items:center; gap:0.5rem;">⚠ Alerta: {{ viaturas_incompletas|length }} viatura(s) sem dados individuais</h3>
+            <p style="color:#92400e; font-size:0.9rem; margin-top:0.5rem;">
+                Estas viaturas foram registadas em lote e aguardam individualização (matrícula, chassis, modelo e estado de conservação).
+                Enquanto os dados estiverem incompletos, <strong>não podem ser movimentadas</strong>. Este alerta permanece visível até todas estarem completas.
+            </p>
+            <div style="overflow-x:auto; margin-top:1rem;">
+                <table style="width:100%; border-collapse:collapse;">
+                    <thead>
+                        <tr style="background:#fef3c7; text-align:left; color:#92400e; font-size:0.8rem;">
+                            <th style="padding:0.6rem;">REFERÊNCIA</th>
+                            <th style="padding:0.6rem;">EQUIPAMENTO</th>
+                            <th style="padding:0.6rem;">MARCA</th>
+                            <th style="padding:0.6rem;">SETOR</th>
+                            <th style="padding:0.6rem;">DADOS EM FALTA</th>
+                            <th style="padding:0.6rem; text-align:right;">AÇÃO</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for v in viaturas_incompletas %}
+                        <tr style="border-bottom:1px solid #fde68a;">
+                            <td style="padding:0.6rem; font-family:monospace;">{{ v.numero_serie }}</td>
+                            <td style="padding:0.6rem; font-weight:600;">{{ v.equipamento }}</td>
+                            <td style="padding:0.6rem;">{{ v.marca or '-' }}</td>
+                            <td style="padding:0.6rem;">{{ v.setor_nome or '-' }}</td>
+                            <td style="padding:0.6rem; color:#b45309;">{{ v.missing_fields|join(', ') }}</td>
+                            <td style="padding:0.6rem; text-align:right;">
+                                <button type="button" class="btn btn-blue" style="margin-top:0; padding:0.3rem 0.8rem; font-size:0.8rem;" onclick="abrirCompletarViatura({{ v.id }})">Completar Dados</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
         
         <div class="card" style="margin-bottom: 2rem;">
             <form method="GET" action="/inventario" style="display:flex; flex-wrap:wrap; gap:1rem; align-items:flex-end;">
+                {% if tipo_bem_filtro %}<input type="hidden" name="tipo_bem" value="VIATURA">{% endif %}
                 <div style="flex:1; min-width:250px;">
                     <label style="font-weight:600; font-size:0.85rem; color:#475569;">Local (Setor) — visualize um ou vários</label>
                     <select name="filtro_setor" multiple size="6" style="width:100%; margin-top:0.25rem;">
@@ -1905,7 +1971,12 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                 </div>
                 <div style="display:flex; gap:0.5rem;">
                     <button class="btn btn-blue" style="margin-top:0;">Filtrar</button>
+                    {% if tipo_bem_filtro %}
+                    <a href="/inventario?tipo_bem=VIATURA" class="btn btn-outline" style="margin-top:0; background:white;">Limpar local</a>
+                    <a href="/inventario" class="btn btn-outline" style="margin-top:0; background:white;">Ver todo o inventário</a>
+                    {% else %}
                     <a href="/inventario" class="btn btn-outline" style="margin-top:0; background:white;">Limpar</a>
+                    {% endif %}
                 </div>
             </form>
         </div>
@@ -2074,7 +2145,66 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
         <div style="display: grid; grid-template-columns: 350px 1fr; gap: 1.5rem; align-items: start;">
             <div class="card">
                 <h3>Cadastrar Equipamento</h3>
-                <form method="POST" action="/inventario/add" enctype="multipart/form-data" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+                <form id="formCadastroInventario" method="POST" action="/inventario/add" enctype="multipart/form-data" onsubmit="validarCadastroViatura(event)" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+                    <div>
+                        <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Tipo de Bem</label>
+                        <select name="tipo_bem" id="tipo_bem" onchange="toggleCamposViatura()" style="margin-top: 0.25rem;">
+                            <option value="EQUIPAMENTO" {% if tipo_bem_filtro != 'VIATURA' %}selected{% endif %}>Equipamento / Material</option>
+                            <option value="VIATURA" {% if tipo_bem_filtro == 'VIATURA' %}selected{% endif %}>Viatura (bem patrimonial)</option>
+                        </select>
+                    </div>
+                    <div id="camposViatura" style="display:none; flex-direction:column; gap:1rem; border:1px dashed #94a3b8; padding:0.75rem; border-radius:0.5rem; background:#f8fafc;">
+                        <div style="font-size:0.8rem; color:#475569;">Dados individuais da viatura. Com quantidade &gt; 1 os campos individuais não são aplicados — cada unidade fica por individualizar. O <strong>Concurso de Aquisição</strong> é aplicado a todas as unidades do lote.</div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Modelo</label>
+                            <input name="modelo" placeholder="Ex: Toyota Hilux" style="margin-top: 0.25rem;">
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Matrícula</label>
+                            <input name="matricula" placeholder="Ex: AAA-000-MC" style="margin-top: 0.25rem;">
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Chassis / Nº de quadro</label>
+                            <input name="chassis" placeholder="Nº do chassis" style="margin-top: 0.25rem;">
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Ano</label>
+                            <input name="ano" placeholder="Ex: 2024" style="margin-top: 0.25rem;">
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Cor</label>
+                            <input name="cor" placeholder="Ex: Branco" style="margin-top: 0.25rem;">
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Tipo de Combustível</label>
+                            <select name="tipo_combustivel" style="margin-top: 0.25rem;">
+                                <option value="">-- Selecione --</option>
+                                <option value="Gasóleo">Gasóleo</option>
+                                <option value="Gasolina">Gasolina</option>
+                                <option value="Elétrico">Elétrico</option>
+                                <option value="Híbrido">Híbrido</option>
+                                <option value="Outro">Outro</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Quilometragem</label>
+                            <input name="quilometragem" type="number" min="0" placeholder="Km" style="margin-top: 0.25rem;">
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Estado de Conservação</label>
+                            <select name="estado_conservacao" style="margin-top: 0.25rem;">
+                                <option value="">-- Selecione --</option>
+                                <option value="Bom">Bom</option>
+                                <option value="Regular">Regular</option>
+                                <option value="Mau">Mau</option>
+                                <option value="Inoperativa">Inoperativa</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Concurso de Aquisição</label>
+                            <input name="concurso" placeholder="Ex: Concurso Público nº 12/2025" style="margin-top: 0.25rem;">
+                        </div>
+                    </div>
                     <div>
                         <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Tipo de Equipamento</label>
                         <select name="equipamento" required style="margin-top: 0.25rem;">
@@ -2099,7 +2229,8 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                     </div>
                     <div>
                         <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Quantidade</label>
-                        <input name="quantidade" type="number" min="1" value="1" required style="margin-top: 0.25rem;">
+                        <input name="quantidade" id="cadastro_quantidade" type="number" min="1" value="1" required style="margin-top: 0.25rem;">
+                        <div id="avisoQuantidadeViatura" style="display:none; font-size:0.75rem; color:#b45309; margin-top:0.25rem;">Cada unidade será criada como uma viatura por individualizar.</div>
                     </div>
                     <div>
                         <label style="font-weight: 600; font-size: 0.85rem; color: #475569;">Setor Pertencente</label>
@@ -2246,6 +2377,73 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
         </div>
     </div>
 
+    <!-- Modal de Completação de Dados da Viatura -->
+    <div id="completarViaturaModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1015; display:none; justify-content:center; align-items:center;">
+        <div class="card" style="width:520px; max-width:92%; max-height:92vh; overflow-y:auto;">
+            <h3>🚗 Completar Dados da Viatura</h3>
+            <p style="font-size:0.85rem; color:#64748b; margin-top:0.5rem;">Matrícula, chassis, modelo e estado de conservação são obrigatórios.</p>
+            <form id="completarViaturaForm" method="POST" action="" style="margin-top:1rem; display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+                <div style="grid-column: span 2;">
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Modelo *</label>
+                    <input name="modelo" id="cv_modelo" required style="width:100%; margin-top:0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Matrícula *</label>
+                    <input name="matricula" id="cv_matricula" required style="width:100%; margin-top:0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Chassis *</label>
+                    <input name="chassis" id="cv_chassis" required style="width:100%; margin-top:0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Ano</label>
+                    <input name="ano" id="cv_ano" style="width:100%; margin-top:0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Cor</label>
+                    <input name="cor" id="cv_cor" style="width:100%; margin-top:0.25rem;">
+                </div>
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Combustível</label>
+                    <select name="tipo_combustivel" id="cv_combustivel" style="width:100%; margin-top:0.25rem;">
+                        <option value="">-- Selecione --</option>
+                        <option value="Gasóleo">Gasóleo</option>
+                        <option value="Gasolina">Gasolina</option>
+                        <option value="Elétrico">Elétrico</option>
+                        <option value="Híbrido">Híbrido</option>
+                        <option value="Outro">Outro</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Quilometragem</label>
+                    <input name="quilometragem" id="cv_km" type="number" min="0" style="width:100%; margin-top:0.25rem;">
+                </div>
+                <div style="grid-column: span 2;">
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Estado de Conservação *</label>
+                    <select name="estado_conservacao" id="cv_estado" required style="width:100%; margin-top:0.25rem;">
+                        <option value="">-- Selecione --</option>
+                        <option value="Bom">Bom</option>
+                        <option value="Regular">Regular</option>
+                        <option value="Mau">Mau</option>
+                        <option value="Inoperativa">Inoperativa</option>
+                    </select>
+                </div>
+                <div style="grid-column: span 2;">
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Concurso de Aquisição</label>
+                    <input name="concurso" id="cv_concurso" placeholder="Ex: Concurso Público nº 12/2025" style="width:100%; margin-top:0.25rem;">
+                </div>
+                <div style="grid-column: span 2;">
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Observações</label>
+                    <textarea name="observacoes" id="cv_observacoes" rows="2" style="width:100%; margin-top:0.25rem;"></textarea>
+                </div>
+                <div style="grid-column: span 2; display:flex; gap:1rem; margin-top:0.5rem;">
+                    <button type="button" class="btn btn-outline" style="flex:1" onclick="document.getElementById('completarViaturaModal').style.display='none'">Cancelar</button>
+                    <button type="submit" class="btn btn-blue" style="flex:1">Guardar Dados</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Modal de Saída Rápida a partir do Inventário -->
     <div id="saidaRapidaInvModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1010; display:none; justify-content:center; align-items:center;">
         <div class="card" style="width:750px; max-width:95%; max-height:90vh; overflow-y:auto;">
@@ -2325,14 +2523,29 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
     <!-- Modal de Transferência de Múltiplos Itens -->
     <div id="transferModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; display:none; justify-content:center; align-items:center;">
         <div class="card" style="width:500px; max-width:90%;">
-            <h3>📁 Transferir Equipamentos para Setor</h3>
+            <h3>📁 Transferir Equipamentos</h3>
             <form id="transferForm" onsubmit="submeterTransferencia(event)" style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1rem;">
                 <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Tipo de Destino</label>
+                    <select id="trans_destino_tipo" onchange="toggleDestinoTransfer()">
+                        <option value="interno">Setor Interno</option>
+                        <option value="externo">Entidade Externa</option>
+                    </select>
+                </div>
+                <div id="trans_setor_wrap">
                     <label style="font-weight:600; font-size:0.85rem; color:#475569;">Setor de Destino</label>
-                    <select id="trans_setor_destino_id" required>
+                    <select id="trans_setor_destino_id">
                         <option value="">-- Selecione o Setor --</option>
                         {% for s in setores %}<option value="{{s.id}}">{{s.nome}}</option>{% endfor %}
                     </select>
+                </div>
+                <div id="trans_externo_wrap" style="display:none;">
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Entidade Externa de Destino</label>
+                    <input id="trans_entidade_externa" list="instituicoes_list" placeholder="Escreva o nome da entidade externa" style="padding:0.4rem; width:100%;">
+                    <datalist id="instituicoes_list">
+                        {% for i in instituicoes %}<option value="{{i.nome}}">{% endfor %}
+                    </datalist>
+                    <div style="font-size:0.75rem; color:#64748b; margin-top:0.25rem;">Pode escrever qualquer nome ou escolher uma entidade já cadastrada.</div>
                 </div>
                 <div id="trans_items_container" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); padding: 0.5rem; border-radius: 4px; display:flex; flex-direction:column; gap:0.5rem;">
                     <!-- Quantidades inputs dynamically loaded -->
@@ -2350,6 +2563,10 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                 <div>
                     <label style="font-weight:600; font-size:0.85rem; color:#475569;">Motivo da Transferência</label>
                     <input type="text" id="trans_motivo" required placeholder="Ex: Necessidade de serviço" style="padding:0.4rem;">
+                </div>
+                <div>
+                    <label style="font-weight:600; font-size:0.85rem; color:#475569;">Observações</label>
+                    <textarea id="trans_observacoes" rows="2" placeholder="Detalhes adicionais da transferência..." style="padding:0.4rem;"></textarea>
                 </div>
                 <div style="display:flex; gap:1rem; margin-top:0.5rem;">
                     <button type="button" class="btn btn-outline" style="flex:1" onclick="fecharTransferModal()">Cancelar</button>
@@ -2412,7 +2629,7 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
         function searchInvTable() {
             const query = document.getElementById("invSearchInput").value.toUpperCase();
             filteredItems = allItems.filter(item => {
-                const text = `${item.equipamento} ${item.marca} ${item.numero_serie} ${item.status} ${item.setor_nome || ''}`.toUpperCase();
+                const text = `${item.equipamento} ${item.marca} ${item.numero_serie} ${item.status} ${item.setor_nome || ''} ${item.modelo || ''} ${item.matricula || ''} ${item.chassis || ''} ${item.concurso || ''} ${item.entidade_externa || ''}`.toUpperCase();
                 return text.indexOf(query) > -1;
             });
             currentPage = 1;
@@ -2444,28 +2661,46 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                     const estadoSpan = `<span style="background:#e2e8f0; color:#334155; padding:0.25rem 0.5rem; border-radius:0.25rem; font-size:0.75rem; font-weight:600;">${estadoLabel}</span>`;
                     
                     const isChecked = selectedIds.has(item.id) ? 'checked' : '';
-                    const actionSaida = (item.quantidade > 0 && item.status === 'Disponível') 
+                    const isViatura = (item.tipo_bem || 'EQUIPAMENTO') === 'VIATURA';
+                    const viaturaIncompleta = isViatura && (!item.matricula || !item.chassis || !item.modelo || !item.estado_conservacao);
+                    const actionSaida = (item.quantidade > 0 && item.status === 'Disponível' && !viaturaIncompleta) 
                         ? `<button onclick="abrirSaidaRapidaInventario(${item.id})" class="btn btn-green" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;">Saída</button>` 
+                        : '';
+                    const actionCompletar = viaturaIncompleta
+                        ? `<button onclick="abrirCompletarViatura(${item.id})" class="btn btn-blue" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;">Completar</button>`
                         : '';
                     const docLink = item.documento_pdf 
                         ? `<a href="/documentos/${item.documento_pdf}" target="_blank" title="Ver documento" style="text-decoration:none;">📄</a>` 
                         : '-';
                     const guiaExib = item.guia_origem || ('INV-' + item.id);
+                    const tipoBadge = isViatura
+                        ? `<span style="background:#ede9fe; color:#5b21b6; padding:0.15rem 0.4rem; border-radius:0.2rem; font-size:0.65rem; font-weight:700; margin-left:0.35rem;">VIATURA</span>`
+                        : '';
+                    const localExterno = item.entidade_externa
+                        ? `<div style="font-size:0.72rem; color:#b45309; margin-top:0.2rem;">🏢 ${item.entidade_externa}</div>`
+                        : '';
+                    const detalheViatura = isViatura && !viaturaIncompleta
+                        ? `<div style="font-size:0.72rem; color:#64748b; margin-top:0.2rem;">${item.modelo || ''}${item.ano ? ' · ' + item.ano : ''}${item.cor ? ' · ' + item.cor : ''}${item.concurso ? ' · Concurso: ' + item.concurso : ''}</div>`
+                        : '';
+                    const alertaIncompleta = viaturaIncompleta
+                        ? `<div style="font-size:0.72rem; color:#b45309; margin-top:0.2rem; font-weight:600;">⚠ Dados em falta</div>`
+                        : '';
                         
                     const tr = document.createElement("tr");
                     tr.style.borderBottom = "1px solid var(--border)";
                     tr.innerHTML = `
                         <td style="padding:0.75rem;"><input type="checkbox" class="row-checkbox" value="${item.id}" data-qty="${item.quantidade}" ${isChecked} onclick="toggleSelectRow(this, ${item.id})"></td>
-                        <td style="padding:0.75rem; font-weight: 600;">${item.equipamento}</td>
+                        <td style="padding:0.75rem; font-weight: 600;">${item.equipamento}${tipoBadge}${detalheViatura}${alertaIncompleta}</td>
                         <td style="padding:0.75rem">${item.marca}</td>
                         <td style="padding:0.75rem; font-family: monospace;">${item.numero_serie}</td>
                         <td style="padding:0.75rem; text-align: center; font-weight: bold;">${item.quantidade}</td>
-                        <td style="padding:0.75rem; color:#475569;">${item.setor_nome || '-'}</td>
+                        <td style="padding:0.75rem; color:#475569;">${item.setor_nome || '-'}${localExterno}</td>
                         <td style="padding:0.75rem; color:#1e40af;">${item.provincia_nome || '-'}</td>
                         <td style="padding:0.75rem">${estadoSpan}</td>
                         <td style="padding:0.75rem">${statusSpan}</td>
                         <td style="padding:0.75rem; text-align:center;">${docLink}</td>
                         <td style="padding:0.75rem; text-align: right; display:flex; gap:0.25rem; justify-content: flex-end; align-items: center; flex-wrap: wrap;">
+                            ${actionCompletar}
                             ${actionSaida}
                             <button onclick="abrirEstadoModal(${item.id}, '${guiaExib}')" class="btn btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;" title="Mudar estado intermédio">Estado</button>
                             <button onclick="verRastreio(${item.id}, 'inventario')" class="btn btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-top:0;" title="Ver histórico/rastreio">Rastreio</button>
@@ -2542,6 +2777,11 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
             
             const container = document.getElementById("trans_items_container");
             container.innerHTML = "";
+            document.getElementById("trans_destino_tipo").value = "interno";
+            document.getElementById("trans_setor_destino_id").value = "";
+            document.getElementById("trans_entidade_externa").value = "";
+            document.getElementById("trans_observacoes").value = "";
+            toggleDestinoTransfer();
             
             selectedIds.forEach(id => {
                 const item = allItems.find(x => x.id === id);
@@ -2569,12 +2809,40 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
             document.getElementById("transferModal").style.display = "none";
         }
 
+        function toggleDestinoTransfer() {
+            const externo = document.getElementById("trans_destino_tipo").value === "externo";
+            document.getElementById("trans_setor_wrap").style.display = externo ? "none" : "block";
+            document.getElementById("trans_externo_wrap").style.display = externo ? "block" : "none";
+        }
+
         function submeterTransferencia(e) {
             e.preventDefault();
+            const destinoTipo = document.getElementById("trans_destino_tipo").value;
             const sectorDestId = document.getElementById("trans_setor_destino_id").value;
+            const entidadeExterna = document.getElementById("trans_entidade_externa").value.trim();
             const entregue = document.getElementById("trans_entregue_por").value;
             const recebido = document.getElementById("trans_recebido_por").value;
             const motivo = document.getElementById("trans_motivo").value;
+            const observacoes = document.getElementById("trans_observacoes").value;
+
+            if (destinoTipo === "interno" && !sectorDestId) {
+                alert("Selecione o setor de destino.");
+                return;
+            }
+            if (destinoTipo === "externo" && !entidadeExterna) {
+                alert("Indique a entidade externa de destino.");
+                return;
+            }
+
+            const incompletas = Array.from(selectedIds)
+                .map(id => allItems.find(x => x.id === id))
+                .filter(item => item && (item.tipo_bem || 'EQUIPAMENTO') === 'VIATURA' &&
+                    (!item.matricula || !item.chassis || !item.modelo || !item.estado_conservacao));
+            if (incompletas.length) {
+                alert("⚠ Movimentação bloqueada. Complete os dados individuais das seguintes viaturas antes de movimentar:\n\n" +
+                    incompletas.map(i => `• ${i.numero_serie} (${i.equipamento})`).join("\n"));
+                return;
+            }
             
             const qtyInputs = document.querySelectorAll(".trans-qty");
             const quantities = {};
@@ -2595,10 +2863,13 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
                 body: JSON.stringify({
                     ids: Array.from(selectedIds),
                     quantities: quantities,
+                    destino_tipo: destinoTipo,
                     setor_destino_id: sectorDestId,
+                    entidade_externa: entidadeExterna,
                     entregue_por: entregue,
                     recebido_por: recebido,
-                    motivo: motivo
+                    motivo: motivo,
+                    observacoes: observacoes
                 })
             })
             .then(r => r.json())
@@ -2623,6 +2894,58 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
             document.getElementById('ei_status').value = item.status;
             document.getElementById('ei_observacoes').value = item.observacoes || '';
             document.getElementById('editInvModal').style.display = 'flex';
+        }
+
+        function toggleCamposViatura() {
+            const tipo = document.getElementById('tipo_bem').value;
+            document.getElementById('camposViatura').style.display = tipo === 'VIATURA' ? 'flex' : 'none';
+            document.getElementById('avisoQuantidadeViatura').style.display = tipo === 'VIATURA' ? 'block' : 'none';
+        }
+
+        function validarCadastroViatura(e) {
+            const tipo = document.getElementById('tipo_bem').value;
+            if (tipo !== 'VIATURA') return true;
+            const qtd = parseInt(document.getElementById('cadastro_quantidade').value) || 1;
+            if (qtd > 1) {
+                const msg = `⚠ ATENÇÃO: vai criar ${qtd} viaturas por individualizar (estado "Aguarda Dados").\n\n` +
+                    `Só é possível registar os dados individuais (matrícula, chassis, modelo, estado) de uma viatura de cada vez.\n` +
+                    `As ${qtd} linhas ficarão à espera desses dados, o sistema emitirá sempre este alerta e NÃO permitirá movimentá-las até estarem completas.\n\n` +
+                    `Deseja continuar?`;
+                if (!confirm(msg)) { e.preventDefault(); return false; }
+                return true;
+            }
+            const obrigatorios = [
+                ['modelo', 'Modelo'], ['matricula', 'Matrícula'], ['chassis', 'Chassis'],
+                ['estado_conservacao', 'Estado de conservação']
+            ];
+            const falta = obrigatorios.filter(([name]) => {
+                const el = document.querySelector(`#formCadastroInventario [name="${name}"]`);
+                return !el || !el.value.trim();
+            }).map(([, label]) => label);
+            if (falta.length) {
+                const msg = `⚠ Dados em falta: ${falta.join(', ')}.\n\n` +
+                    `A viatura será criada como "Aguarda Dados". O sistema alertará até completar e não permitirá movimentá-la enquanto faltar informação.\n\n` +
+                    `Deseja continuar?`;
+                if (!confirm(msg)) { e.preventDefault(); return false; }
+            }
+            return true;
+        }
+
+        function abrirCompletarViatura(id) {
+            const item = allItems.find(x => x.id === id);
+            if (!item) return;
+            document.getElementById('completarViaturaForm').action = `/inventario/viatura/${item.id}/completar`;
+            document.getElementById('cv_modelo').value = item.modelo || '';
+            document.getElementById('cv_matricula').value = item.matricula || '';
+            document.getElementById('cv_chassis').value = item.chassis || '';
+            document.getElementById('cv_ano').value = item.ano || '';
+            document.getElementById('cv_cor').value = item.cor || '';
+            document.getElementById('cv_combustivel').value = item.tipo_combustivel || '';
+            document.getElementById('cv_km').value = item.quilometragem || '';
+            document.getElementById('cv_estado').value = item.estado_conservacao || '';
+            document.getElementById('cv_concurso').value = item.concurso || '';
+            document.getElementById('cv_observacoes').value = item.observacoes || '';
+            document.getElementById('completarViaturaModal').style.display = 'flex';
         }
 
         function abrirSaidaRapidaInventario(id) {
@@ -2670,6 +2993,7 @@ INVENTARIO_TEMPLATE = '''<!DOCTYPE html><html lang="pt"><head>''' + COMMON_HEAD 
         }
 
         // Initial table load
+        toggleCamposViatura();
         renderTable();
 
         // ---- Estado intermédio ----
@@ -2834,6 +3158,34 @@ def get_locais_acesso():
         sid = session.get('setor_id')
         return [sid] if sid else []
     return [int(x) for x in raw.split(',') if x.strip().isdigit()]
+
+
+VIATURA_CAMPOS_OBRIGATORIOS = [
+    ('matricula', 'Matrícula'),
+    ('chassis', 'Chassis / Nº de quadro'),
+    ('modelo', 'Modelo'),
+    ('estado_conservacao', 'Estado de conservação'),
+]
+
+
+def viatura_campos_em_falta(item):
+    if not item or (item.get('tipo_bem') or 'EQUIPAMENTO') != 'VIATURA':
+        return []
+    return [rotulo for campo, rotulo in VIATURA_CAMPOS_OBRIGATORIOS if not (item.get(campo) or '').strip()]
+
+
+def viatura_completa(item):
+    if not item or (item.get('tipo_bem') or 'EQUIPAMENTO') != 'VIATURA':
+        return True
+    return not viatura_campos_em_falta(item)
+
+
+def mensagem_viatura_incompleta(item):
+    faltam = viatura_campos_em_falta(item)
+    if not faltam:
+        return ''
+    ref = item.get('matricula') or item.get('numero_serie') or f"ID {item.get('id')}"
+    return f"Viatura {ref} com dados em falta ({', '.join(faltam)}). Complete os dados antes de movimentar."
 
 
 MOVIMENTOS_TEMPLATE = """<!DOCTYPE html><html lang="pt"><head>""" + COMMON_HEAD + """<title>Todos os Movimentos - STAE</title>
@@ -4870,19 +5222,31 @@ def inventario():
         ph = ','.join('?' * len(chosen))
         where_setor = f" AND i.setor_id IN ({ph})"
         params = list(chosen)
+
+    tipo_bem_filtro = (request.args.get('tipo_bem') or '').upper()
+    if tipo_bem_filtro != 'VIATURA':
+        tipo_bem_filtro = ''
+    cond_tipo = " AND i.tipo_bem='VIATURA'" if tipo_bem_filtro else ""
     
     # Base query for inventory (excluding Pending which is shown in a separate panel)
     c.execute(f'''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
                         i.data_registo, i.observacoes, i.setor_id, s.nome as setor_nome,
-                        i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome, i.documento_pdf, i.guia_origem
+                        i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_nome, i.documento_pdf, i.guia_origem,
+                        i.tipo_bem, i.modelo, i.matricula, i.chassis, i.ano, i.cor, i.tipo_combustivel,
+                        i.quilometragem, i.estado_conservacao, i.concurso, i.entidade_externa, i.dados_completos
                  FROM inventario_local i 
                  LEFT JOIN setores s ON i.setor_id = s.id 
                  LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
-                 WHERE i.status != 'Pendente'{where_setor}
+                 WHERE i.status != 'Pendente'{where_setor}{cond_tipo}
                  ORDER BY i.id DESC''', params)
 
     cols = [d[0] for d in c.description]
     items = [dict(zip(cols, r)) for r in c.fetchall()]
+    viaturas_incompletas = []
+    for it in items:
+        if not viatura_completa(it):
+            it['missing_fields'] = viatura_campos_em_falta(it)
+            viaturas_incompletas.append(it)
     
     # Load pending confirmation list (same scope as the inventory view)
     c.execute(f'''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, 
@@ -4891,17 +5255,17 @@ def inventario():
                  FROM inventario_local i 
                  LEFT JOIN setores s ON i.setor_id = s.id 
                  LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
-                 WHERE i.status = 'Pendente'{where_setor}
+                 WHERE i.status = 'Pendente'{where_setor}{cond_tipo}
                  ORDER BY i.id DESC''', params)
     cols_p = [d[0] for d in c.description]
     pending_items = [dict(zip(cols_p, r)) for r in c.fetchall()]
 
     # Pendentes de transferência ENTRE PROVÍNCIAS (confirmar receção no destino)
-    c.execute('''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, i.guia_origem,
+    c.execute(f'''SELECT i.id, i.equipamento, i.marca, i.numero_serie, i.quantidade, i.status, i.guia_origem,
                         i.codigo_barras, i.estado, i.local_uso, i.provincia_id, p.nome as provincia_destino_nome
                  FROM inventario_local i 
                  LEFT JOIN eleitoral_provincia p ON i.provincia_id = p.id
-                 WHERE i.status = 'Pendente' AND i.provincia_id IS NOT NULL
+                 WHERE i.status = 'Pendente' AND i.provincia_id IS NOT NULL{cond_tipo}
                  ORDER BY i.id DESC''')
     cols_pp = [d[0] for d in c.description]
     provincias_pendentes = [dict(zip(cols_pp, r)) for r in c.fetchall()]
@@ -4914,17 +5278,18 @@ def inventario():
         cond_setor = ""
         stats_params = []
     
-    c.execute("SELECT COUNT(*), SUM(quantidade) FROM inventario_local WHERE status != 'Pendente'" + cond_setor, stats_params)
+    cond_tipo_stats = " AND tipo_bem='VIATURA'" if tipo_bem_filtro else ""
+    c.execute("SELECT COUNT(*), SUM(quantidade) FROM inventario_local WHERE status != 'Pendente'" + cond_setor + cond_tipo_stats, stats_params)
     res = c.fetchone()
     total_qty = res[1] if res else 0
     
-    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Disponível'" + cond_setor, stats_params)
+    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Disponível'" + cond_setor + cond_tipo_stats, stats_params)
     disponiveis = c.fetchone()[0] or 0
     
-    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Em uso'" + cond_setor, stats_params)
+    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status='Em uso'" + cond_setor + cond_tipo_stats, stats_params)
     em_uso = c.fetchone()[0] or 0
     
-    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status IN ('Danificado', 'Avariado')" + cond_setor, stats_params)
+    c.execute("SELECT SUM(quantidade) FROM inventario_local WHERE status IN ('Danificado', 'Avariado')" + cond_setor + cond_tipo_stats, stats_params)
     danificados = c.fetchone()[0] or 0
     
     stats = {
@@ -4948,7 +5313,10 @@ def inventario():
         filtro_nome = nome_setor.get(chosen[0], 'Inventário')
     else:
         filtro_nome = 'STAE ({} Locais)'.format(len(chosen))
-    titulo_pagina = 'INVENTÁRIO LOCAL - {}'.format(filtro_nome)
+    if tipo_bem_filtro == 'VIATURA':
+        titulo_pagina = 'INVENTÁRIO DE VIATURAS - {}'.format(filtro_nome)
+    else:
+        titulo_pagina = 'INVENTÁRIO LOCAL - {}'.format(filtro_nome)
     c.execute("SELECT id, nome FROM marcas")
     marcas = [{'id':r[0], 'nome':r[1]} for r in c.fetchall()]
     c.execute("SELECT id, nome FROM tipos_equipamento")
@@ -4967,7 +5335,7 @@ def inventario():
     ]
     
     conn.close()
-    return render_template_string(INVENTARIO_TEMPLATE, items=items, pending_items=pending_items, provincias_pendentes=provincias_pendentes, stats=stats, setores=setores, setores_filtro=setores_filtro, filtro_ativo_ids=filtro_ativo_ids, titulo_pagina=titulo_pagina, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, provincias=provincias, estados_intermedios=estados_intermedios, msg=request.args.get('msg'))
+    return render_template_string(INVENTARIO_TEMPLATE, items=items, pending_items=pending_items, provincias_pendentes=provincias_pendentes, stats=stats, setores=setores, setores_filtro=setores_filtro, filtro_ativo_ids=filtro_ativo_ids, titulo_pagina=titulo_pagina, marcas=marcas, tipos=tipos, motivos=motivos, fornecedores=fornecedores, instituicoes=instituicoes, provincias=provincias, estados_intermedios=estados_intermedios, viaturas_incompletas=viaturas_incompletas, tipo_bem_filtro=tipo_bem_filtro, msg=request.args.get('msg'))
 
 @app.route('/inventario/add', methods=['POST'])
 def inventario_add():
@@ -4994,12 +5362,119 @@ def inventario_add():
                 f.save(caminho)
                 documento_pdf = nome
     
-    c.execute('''INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, setor_id, codigo_barras, documento_pdf, provincia_id, local_uso, estado) 
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''', 
-              (request.form.get('equipamento'), request.form.get('marca'), request.form.get('numero_serie'), int(request.form.get('quantidade', 1)), request.form.get('status'), datetime.now().strftime("%Y-%m-%d"), request.form.get('observacoes', ''), setor_val, codigo_barras, documento_pdf, prov_val, request.form.get('local_uso', ''), request.form.get('estado', 'EM_ESTOQUE')))
+    tipo_bem = (request.form.get('tipo_bem') or 'EQUIPAMENTO').upper()
+    if tipo_bem not in ('EQUIPAMENTO', 'VIATURA'):
+        tipo_bem = 'EQUIPAMENTO'
+
+    try:
+        qtd = max(1, int(request.form.get('quantidade', 1) or 1))
+    except (TypeError, ValueError):
+        qtd = 1
+
+    equipamento = request.form.get('equipamento')
+    marca = request.form.get('marca')
+    observacoes = request.form.get('observacoes', '')
+    local_uso = request.form.get('local_uso', '')
+    estado = request.form.get('estado', 'EM_ESTOQUE')
+    data_registo = datetime.now().strftime("%Y-%m-%d")
+
+    if tipo_bem == 'VIATURA':
+        dados = {
+            'modelo': request.form.get('modelo', '').strip(),
+            'matricula': request.form.get('matricula', '').strip(),
+            'chassis': request.form.get('chassis', '').strip(),
+            'ano': request.form.get('ano', '').strip(),
+            'cor': request.form.get('cor', '').strip(),
+            'tipo_combustivel': request.form.get('tipo_combustivel', '').strip(),
+            'quilometragem': request.form.get('quilometragem', '').strip(),
+            'estado_conservacao': request.form.get('estado_conservacao', '').strip(),
+            'concurso': request.form.get('concurso', '').strip(),
+        }
+        faltam = [rotulo for campo, rotulo in VIATURA_CAMPOS_OBRIGATORIOS if not dados[campo]]
+        ts = datetime.now().strftime('%Y%m%d%H%M%S%f')
+
+        if qtd == 1:
+            completo = 0 if faltam else 1
+            numero_serie = dados['matricula'] or f"VIT-{ts}-1"
+            status_final = (request.form.get('status') or 'Disponível') if completo else 'Aguarda Dados'
+            c.execute('''INSERT INTO inventario_local
+                         (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, setor_id,
+                          codigo_barras, documento_pdf, provincia_id, local_uso, estado, tipo_bem, modelo, matricula,
+                          chassis, ano, cor, tipo_combustivel, quilometragem, estado_conservacao, concurso, dados_completos)
+                         VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                      (equipamento, marca, numero_serie, status_final, data_registo, observacoes, setor_val,
+                       codigo_barras, documento_pdf, prov_val, local_uso, estado, 'VIATURA', dados['modelo'],
+                       dados['matricula'], dados['chassis'], dados['ano'], dados['cor'], dados['tipo_combustivel'],
+                       dados['quilometragem'], dados['estado_conservacao'], dados['concurso'], completo))
+            if completo:
+                msg = "Viatura registada com dados completos no inventário!"
+            else:
+                msg = (f"⚠ Viatura registada como 'Aguarda Dados'. Faltam: {', '.join(faltam)}. "
+                       "O sistema vai continuar a alertar até completar os dados; a movimentação está bloqueada.")
+            conn.commit()
+            conn.close()
+            return redirect(url_for('inventario', msg=msg))
+
+        for i in range(1, qtd + 1):
+            c.execute('''INSERT INTO inventario_local
+                         (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, setor_id,
+                          codigo_barras, provincia_id, local_uso, estado, concurso, tipo_bem, dados_completos)
+                         VALUES (?,?,?,1,'Aguarda Dados',?,?,?,?,?,?,?,?,'VIATURA',0)''',
+                      (equipamento, marca, f"VIT-{ts}-{i}", data_registo, observacoes, setor_val,
+                       codigo_barras, prov_val, local_uso, estado, dados['concurso']))
+        conn.commit()
+        conn.close()
+        msg = (f"⚠ Foram criadas {qtd} viaturas por individualizar (estado 'Aguarda Dados'). "
+               "Cada viatura deve ser completada com matrícula, chassis, modelo e estado de conservação. "
+               "O sistema vai emitir este alerta enquanto existirem viaturas por completar e não permite movimentá-las.")
+        return redirect(url_for('inventario', msg=msg))
+
+    c.execute('''INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, setor_id, codigo_barras, documento_pdf, provincia_id, local_uso, estado, tipo_bem, dados_completos) 
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'EQUIPAMENTO',1)''', 
+              (equipamento, marca, request.form.get('numero_serie'), qtd, request.form.get('status'), data_registo, observacoes, setor_val, codigo_barras, documento_pdf, prov_val, local_uso, estado))
     conn.commit()
     conn.close()
     return redirect(url_for('inventario', msg="Item adicionado ao inventário local!"))
+
+@app.route('/inventario/viatura/<int:item_id>/completar', methods=['POST'])
+def inventario_completar_viatura(item_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    dados = {
+        'modelo': request.form.get('modelo', '').strip(),
+        'matricula': request.form.get('matricula', '').strip(),
+        'chassis': request.form.get('chassis', '').strip(),
+        'ano': request.form.get('ano', '').strip(),
+        'cor': request.form.get('cor', '').strip(),
+        'tipo_combustivel': request.form.get('tipo_combustivel', '').strip(),
+        'quilometragem': request.form.get('quilometragem', '').strip(),
+        'estado_conservacao': request.form.get('estado_conservacao', '').strip(),
+        'concurso': request.form.get('concurso', '').strip(),
+    }
+    faltam = [rotulo for campo, rotulo in VIATURA_CAMPOS_OBRIGATORIOS if not dados[campo]]
+    if faltam:
+        conn.close()
+        return redirect(url_for('inventario', msg=f"⚠ Dados em falta: {', '.join(faltam)}. A viatura continua por completar."))
+
+    c.execute("SELECT id FROM inventario_local WHERE tipo_bem='VIATURA' AND matricula=? AND id<>?", (dados['matricula'], item_id))
+    if c.fetchone():
+        conn.close()
+        return redirect(url_for('inventario', msg=f"⚠ Já existe outra viatura com a matrícula {dados['matricula']}."))
+
+    c.execute('''UPDATE inventario_local SET modelo=?, matricula=?, chassis=?, ano=?, cor=?, tipo_combustivel=?,
+                 quilometragem=?, estado_conservacao=?, concurso=?, numero_serie=?,
+                 status=CASE WHEN status='Aguarda Dados' THEN 'Disponível' ELSE status END,
+                 dados_completos=1, observacoes=COALESCE(NULLIF(?, ''), observacoes)
+                 WHERE id=? AND tipo_bem='VIATURA' ''',
+              (dados['modelo'], dados['matricula'], dados['chassis'], dados['ano'], dados['cor'],
+               dados['tipo_combustivel'], dados['quilometragem'], dados['estado_conservacao'], dados['concurso'],
+               dados['matricula'], request.form.get('observacoes', '').strip(), item_id))
+    if c.rowcount == 0:
+        conn.close()
+        return redirect(url_for('inventario', msg="Erro: viatura não encontrada."))
+    conn.commit()
+    conn.close()
+    return redirect(url_for('inventario', msg=f"Viatura {dados['matricula']} completada com sucesso!"))
 
 @app.route('/inventario/edit/<int:item_id>', methods=['POST'])
 def inventario_edit(item_id):
@@ -5057,83 +5532,132 @@ def inventario_movimentar_multiplos():
     ids = data.get('ids', [])
     quantities = data.get('quantities', {})
     setor_destino_id = data.get('setor_destino_id')
+    destino_tipo = (data.get('destino_tipo') or 'interno').lower()
+    entidade_externa = (data.get('entidade_externa') or '').strip()
     entregue_por = data.get('entregue_por', '')
     recebido_por = data.get('recebido_por', '')
     motivo = data.get('motivo', '')
-    
-    if not ids or not setor_destino_id:
-        return jsonify({'success': False, 'error': 'Parâmetros incompletos.'}), 400
-        
-    setor_destino_id = int(setor_destino_id)
-    
+    observacoes = (data.get('observacoes') or '').strip()
+
+    if not ids:
+        return jsonify({'success': False, 'error': 'Nenhum item selecionado.'}), 400
+
+    externo = destino_tipo == 'externo'
+    if externo:
+        if not entidade_externa:
+            return jsonify({'success': False, 'error': 'Indique a entidade externa de destino.'}), 400
+        setor_destino_id = None
+        dest_name = entidade_externa
+    else:
+        if not setor_destino_id:
+            return jsonify({'success': False, 'error': 'Selecione o setor de destino.'}), 400
+        setor_destino_id = int(setor_destino_id)
+
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    
-    # Get target sector name
-    c.execute("SELECT nome FROM setores WHERE id=?", (setor_destino_id,))
-    res_dest = c.fetchone()
-    dest_name = res_dest[0] if res_dest else f"Setor #{setor_destino_id}"
-    
+
+    if not externo:
+        c.execute("SELECT nome FROM setores WHERE id=?", (setor_destino_id,))
+        res_dest = c.fetchone()
+        dest_name = res_dest[0] if res_dest else f"Setor #{setor_destino_id}"
+
+    colunas = ('equipamento', 'marca', 'numero_serie', 'quantidade', 'status', 'observacoes', 'setor_id',
+               'tipo_bem', 'modelo', 'matricula', 'chassis', 'ano', 'cor', 'tipo_combustivel', 'quilometragem',
+               'estado_conservacao', 'concurso', 'dados_completos', 'entidade_externa', 'codigo_barras', 'documento_pdf',
+               'provincia_id', 'local_uso')
+
     try:
-        # Step 1: Validate quantities first to abort early if there is any error
+        # Step 1: Validate quantities and vehicle data before changing anything
         for item_id in ids:
             qty_req = int(quantities.get(str(item_id)) or quantities.get(item_id) or 1)
-            c.execute("SELECT equipamento, quantidade FROM inventario_local WHERE id=?", (item_id,))
-            item = c.fetchone()
-            if not item:
+            c.execute(f"SELECT {', '.join(colunas)} FROM inventario_local WHERE id=?", (item_id,))
+            row = c.fetchone()
+            if not row:
                 return jsonify({'success': False, 'error': f'Item ID {item_id} não encontrado no inventário.'}), 400
-            if item[1] < qty_req:
-                return jsonify({'success': False, 'error': f'Quantidade solicitada para {item[0]} ({qty_req}) excede o stock disponível ({item[1]}).'}), 400
-        
+            item = dict(zip(colunas, row))
+            if not viatura_completa(item):
+                return jsonify({'success': False, 'error': mensagem_viatura_incompleta(item)}), 400
+            if item['quantidade'] < qty_req:
+                return jsonify({'success': False, 'error': f"Quantidade solicitada para {item['equipamento']} ({qty_req}) excede o stock disponível ({item['quantidade']})."}), 400
+
         # Step 2: Perform the movements
         for item_id in ids:
             qty_req = int(quantities.get(str(item_id)) or quantities.get(item_id) or 1)
-            c.execute("SELECT equipamento, marca, numero_serie, quantidade, status, observacoes, setor_id FROM inventario_local WHERE id=?", (item_id,))
-            eq_info = c.fetchone()
-            equipamento, marca, numero_serie, qty_avail, status, observacoes, setor_origem_id = eq_info
-            
-            # Subtract stock
-            new_qty = qty_avail - qty_req
-            if new_qty == 0:
-                c.execute("DELETE FROM inventario_local WHERE id=?", (item_id,))
-            else:
-                c.execute("UPDATE inventario_local SET quantidade=? WHERE id=?", (new_qty, item_id))
-            
-            # Generate unique guide prefix
+            c.execute(f"SELECT {', '.join(colunas)} FROM inventario_local WHERE id=?", (item_id,))
+            item = dict(zip(colunas, c.fetchone()))
+            qty_avail = item['quantidade']
+            setor_origem_id = item['setor_id']
             guia_code = generate_guia('TRANSF', c)
-            
-            # Insert or update pending item in target sector
-            c.execute('''SELECT id, quantidade FROM inventario_local 
-                         WHERE equipamento=? AND marca=? AND numero_serie=? AND status='Pendente' AND setor_id=? AND guia_origem=?''',
-                      (equipamento, marca, numero_serie, setor_destino_id, guia_code))
-            exists_pending = c.fetchone()
-            if exists_pending:
-                c.execute("UPDATE inventario_local SET quantidade=quantidade+? WHERE id=?", (qty_req, exists_pending[0]))
+            obs_destino = ' | '.join(x for x in (item['observacoes'], observacoes) if x)
+
+            if externo:
+                if qty_req >= qty_avail:
+                    c.execute("UPDATE inventario_local SET status='Em uso', entidade_externa=? WHERE id=?",
+                              (entidade_externa, item_id))
+                else:
+                    c.execute("UPDATE inventario_local SET quantidade=? WHERE id=?", (qty_avail - qty_req, item_id))
+                    c.execute('''INSERT INTO inventario_local
+                                 (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, setor_id,
+                                  tipo_bem, modelo, matricula, chassis, ano, cor, tipo_combustivel, quilometragem,
+                                  estado_conservacao, concurso, dados_completos, codigo_barras, documento_pdf, provincia_id,
+                                  local_uso, entidade_externa)
+                                 VALUES (?,?,?,?,'Em uso',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                              (item['equipamento'], item['marca'], item['numero_serie'], qty_req,
+                               datetime.now().strftime("%Y-%m-%d"), obs_destino, setor_origem_id,
+                               item['tipo_bem'], item['modelo'], item['matricula'], item['chassis'], item['ano'],
+                               item['cor'], item['tipo_combustivel'], item['quilometragem'], item['estado_conservacao'],
+                               item['concurso'], item['dados_completos'], item['codigo_barras'], item['documento_pdf'],
+                               item['provincia_id'], item['local_uso'], entidade_externa))
             else:
-                c.execute('''INSERT INTO inventario_local (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, setor_id, guia_origem) 
-                             VALUES (?,?,?,?,?,?,?,?,?)''',
-                          (equipamento, marca, numero_serie, qty_req, 'Pendente', datetime.now().strftime("%Y-%m-%d"), observacoes, setor_destino_id, guia_code))
-            
-            # Get origin sector name
+                new_qty = qty_avail - qty_req
+                if new_qty == 0:
+                    c.execute("DELETE FROM inventario_local WHERE id=?", (item_id,))
+                else:
+                    c.execute("UPDATE inventario_local SET quantidade=? WHERE id=?", (new_qty, item_id))
+
+                c.execute('''SELECT id FROM inventario_local
+                             WHERE equipamento=? AND marca=? AND numero_serie=? AND status='Pendente' AND setor_id=? AND guia_origem=?''',
+                          (item['equipamento'], item['marca'], item['numero_serie'], setor_destino_id, guia_code))
+                exists_pending = c.fetchone()
+                if exists_pending:
+                    c.execute("UPDATE inventario_local SET quantidade=quantidade+? WHERE id=?", (qty_req, exists_pending[0]))
+                else:
+                    c.execute('''INSERT INTO inventario_local
+                                 (equipamento, marca, numero_serie, quantidade, status, data_registo, observacoes, setor_id,
+                                  guia_origem, tipo_bem, modelo, matricula, chassis, ano, cor, tipo_combustivel,
+                                  quilometragem, estado_conservacao, concurso, dados_completos, codigo_barras, documento_pdf,
+                                  provincia_id, local_uso)
+                                 VALUES (?,?,?,?,'Pendente',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                              (item['equipamento'], item['marca'], item['numero_serie'], qty_req,
+                               datetime.now().strftime("%Y-%m-%d"), obs_destino, setor_destino_id, guia_code,
+                               item['tipo_bem'], item['modelo'], item['matricula'], item['chassis'], item['ano'],
+                               item['cor'], item['tipo_combustivel'], item['quilometragem'], item['estado_conservacao'],
+                               item['concurso'], item['dados_completos'], item['codigo_barras'], item['documento_pdf'],
+                               item['provincia_id'], item['local_uso']))
+
             orig_name = "-"
             if setor_origem_id:
                 c.execute("SELECT nome FROM setores WHERE id=?", (setor_origem_id,))
                 res_orig = c.fetchone()
                 orig_name = res_orig[0] if res_orig else f"Setor #{setor_origem_id}"
-                
-            # Log movement
-            origem_destino_str = f"De {orig_name} para {dest_name}"
+
+            destino_label = f"Externo - {dest_name}" if externo else dest_name
+            origem_destino_str = f"De {orig_name} para {destino_label}"
+            tipo_mov = 'TRANSFERENCIA_EXTERNA' if externo else 'TRANSFERENCIA'
+            status_mov = 'Entregue' if externo else 'Pendente'
             c.execute('''INSERT INTO movimentos 
-                (guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, funcionario_id, numero_serie, marca, entregue_por, recebido_por, quantidade, setor_origem_id, setor_destino_id) 
-                VALUES (?, 'TRANSFERENCIA', ?, ?, ?, ?, 'Pendente', ?, NULL, ?, ?, ?, ?, ?, ?, ?)''',
-                (guia_code, equipamento, origem_destino_str, motivo, datetime.now().strftime("%Y-%m-%d"), session['username'], numero_serie, marca, entregue_por, recebido_por, str(qty_req), setor_origem_id, setor_destino_id))
-                
+                (guia, tipo, equipamento, origem_destino, motivo, data, status, tecnico, funcionario_id, numero_serie, marca, entregue_por, recebido_por, quantidade, setor_origem_id, setor_destino_id, local_destino, relatorio) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (guia_code, tipo_mov, item['equipamento'], origem_destino_str, motivo, datetime.now().strftime("%Y-%m-%d"),
+                 status_mov, session['username'], item['numero_serie'], item['marca'], entregue_por, recebido_por,
+                 str(qty_req), setor_origem_id, setor_destino_id, dest_name, observacoes))
+
         conn.commit()
     except Exception as e:
         conn.rollback()
         conn.close()
         return jsonify({'success': False, 'error': f'Erro interno: {e}'}), 500
-        
+
     conn.close()
     return jsonify({'success': True})
 
@@ -5201,6 +5725,10 @@ def registrar_saida_inventario(item_id):
         conn.close()
         return "Item de inventário não encontrado", 404
     item = dict(zip(cols, row))
+    
+    if not viatura_completa(item):
+        conn.close()
+        return redirect(url_for('inventario', msg=f"⚠ {mensagem_viatura_incompleta(item)}"))
     
     qty_to_remove = int(request.form.get('quantidade', 1))
     current_qty = int(item['quantidade'])
@@ -5346,6 +5874,18 @@ def init_pg_db():
             status VARCHAR DEFAULT 'Disponível', 
             data_registo VARCHAR, 
             observacoes VARCHAR,
+            tipo_bem VARCHAR DEFAULT 'EQUIPAMENTO',
+            modelo VARCHAR,
+            matricula VARCHAR,
+            chassis VARCHAR,
+            ano VARCHAR,
+            cor VARCHAR,
+            tipo_combustivel VARCHAR,
+            quilometragem VARCHAR,
+            estado_conservacao VARCHAR,
+            concurso VARCHAR,
+            entidade_externa VARCHAR,
+            dados_completos INTEGER DEFAULT 1,
             last_modified VARCHAR DEFAULT '2026-06-24T00:00:00',
             origem_registo VARCHAR DEFAULT 'local'
         )''')
@@ -5436,6 +5976,15 @@ def init_pg_db():
             c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS setor_origem_id INTEGER")
             c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS setor_destino_id INTEGER")
             c.execute("ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS departamento_responsavel_id INTEGER")
+            for col, coltype in [
+                ('tipo_bem', "VARCHAR DEFAULT 'EQUIPAMENTO'"), ('modelo', 'VARCHAR'), ('matricula', 'VARCHAR'),
+                ('chassis', 'VARCHAR'), ('ano', 'VARCHAR'), ('cor', 'VARCHAR'), ('tipo_combustivel', 'VARCHAR'),
+                ('quilometragem', 'VARCHAR'), ('estado_conservacao', 'VARCHAR'), ('concurso', 'VARCHAR'), ('entidade_externa', 'VARCHAR'),
+                ('dados_completos', 'INTEGER DEFAULT 1')
+            ]:
+                c.execute(f"ALTER TABLE inventario_local ADD COLUMN IF NOT EXISTS {col} {coltype}")
+            c.execute("INSERT INTO tipos_equipamento (nome) VALUES ('Viatura Ligeira') ON CONFLICT (nome) DO NOTHING")
+            c.execute("INSERT INTO tipos_equipamento (nome) VALUES ('Viatura Pesada') ON CONFLICT (nome) DO NOTHING")
         except Exception as ex:
             conn.rollback()
             print(f"[-] Erro ao migrar novas colunas de setor no PG: {ex}")
